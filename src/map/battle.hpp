@@ -780,6 +780,17 @@ struct Battle_Config
 	int32 enable_bonus_map_drops;
 	int32 hide_cloaked_units;
 
+	// Threading configuration
+	int32 enable_threading;
+	int32 cpu_worker_threads;
+	int32 db_worker_threads;
+	int32 enable_mob_threading;
+	int32 enable_pathfinding_threading;
+	int32 enable_battle_threading;
+	int32 enable_db_async;
+	int32 task_queue_limit;
+	int32 verbose_threading;
+
 #include <custom/battle_config_struct.inc>
 };
 

@@ -584,4 +584,113 @@ void mob_setdropitem_option( item& itm, const std::shared_ptr<s_mob_drop>& mobdr
 
 #define CHK_MOBSIZE(size) ((size) >= SZ_SMALL && (size) < SZ_MAX) /// Check valid Monster Size
 
+/**
+ * @brief Snapshot of mob data for thread-safe AI processing
+ *
+ * This structure contains an immutable snapshot of a monster's state at a specific tick.
+ * Worker threads compute AI decisions based on this snapshot without modifying global state.
+ *
+ * Design rationale:
+ * - POD-like structure for safe copying across threads
+ * - Contains only data needed for AI decision making
+ * - Avoids pointers to prevent dangling references
+ * - Includes target position to avoid map_id2bl() calls in worker threads
+ *
+ * Thread safety: Read-only in worker threads, created only in main thread
+ */
+struct mob_ai_snapshot {
+	// Mob identification
+	int32 mob_id;           ///< Monster GID (unique instance ID)
+	int32 mob_class;        ///< Monster type/class ID
+	
+	// Position & map
+	int16 m;                ///< Map ID
+	int16 x, y;             ///< Current position
+	
+	// Health state
+	int32 hp;               ///< Current HP
+	int32 max_hp;           ///< Maximum HP
+	
+	// AI state
+	enum MobSkillState skillstate;  ///< Current skill state (IDLE, WALK, BERSERK, etc.)
+	uint32 aggressive : 1;          ///< Aggressive mode flag
+	uint32 can_move : 1;            ///< Whether mob can move
+	uint32 is_blind : 1;            ///< SC_BLIND status (affects view range)
+	uint32 has_master : 1;          ///< Whether mob has a master (slave mob)
+	int32 provoke_flag;             ///< Provoke target ID (special targeting)
+	
+	// Targeting
+	int32 target_id;        ///< Current target GID
+	int16 target_x;         ///< Target X position (snapshot to avoid map_id2bl)
+	int16 target_y;         ///< Target Y position
+	int32 attacked_id;      ///< ID of attacker (for retaliation)
+	int32 master_id;        ///< Master GID (for summoned/slave mobs)
+	
+	// Combat parameters
+	int16 attack_range;     ///< Attack range (rhw.range)
+	int16 view_range;       ///< View range (db->range2)
+	int16 chase_range;      ///< Chase range (db->range3)
+	int32 mode;             ///< AI mode flags (e_mode)
+	
+	// Movement state
+	uint32 walktimer_active : 1;  ///< Whether mob is currently walking
+	int16 walk_to_x;        ///< Destination X if walking
+	int16 walk_to_y;        ///< Destination Y if walking
+	uint8 walk_path_pos;    ///< Current position in walk path
+	
+	// Timing
+	t_tick next_walktime;   ///< Next time mob can do random walk
+	t_tick last_linktime;   ///< Last time mob called for help
+	
+	// Special flags
+	uint32 bg_id;           ///< Battleground ID (0 if not BG mob)
+	enum mob_ai special_ai; ///< Special AI type
+};
+
+/**
+ * @brief Result of mob AI computation for main thread to apply
+ *
+ * Worker threads compute AI decisions and return this structure.
+ * The main thread validates and applies these actions to the actual game state.
+ *
+ * Design rationale:
+ * - Simple action-oriented design
+ * - All modifications happen in main thread (thread-safe)
+ * - Contains enough context to apply the action
+ *
+ * Thread safety: Created in worker thread, applied in main thread
+ */
+struct mob_ai_result {
+	int32 mob_id;           ///< Monster GID this result applies to
+	
+	/**
+	 * @brief AI action types that can be taken
+	 */
+	enum e_action_type {
+		AI_ACTION_NONE = 0,        ///< No action (continue current behavior)
+		AI_ACTION_MOVE,            ///< Move to destination
+		AI_ACTION_ATTACK,          ///< Attack target
+		AI_ACTION_UNLOCK_TARGET,   ///< Clear target and go idle
+		AI_ACTION_SKILL,           ///< Use skill (Phase 4b-3)
+	} action;
+	
+	// Action parameters (usage depends on action type)
+	int32 target_id;        ///< Target GID for ATTACK/SKILL actions
+	int16 move_x;           ///< Destination X for MOVE action
+	int16 move_y;           ///< Destination Y for MOVE action
+	uint16 skill_id;        ///< Skill ID for SKILL action (future)
+	uint16 skill_lv;        ///< Skill level for SKILL action (future)
+	
+	/**
+	 * @brief Default constructor initializes to no action
+	 */
+	mob_ai_result() : mob_id(0), action(AI_ACTION_NONE), target_id(0),
+	                  move_x(0), move_y(0), skill_id(0), skill_lv(0) {}
+};
+
+// Thread-safe mob AI functions
+mob_ai_snapshot mob_create_ai_snapshot(mob_data* md, t_tick tick);
+mob_ai_result mob_ai_compute_threadsafe(const mob_ai_snapshot& snapshot, t_tick tick);
+void mob_ai_apply_result(const mob_ai_result& result, t_tick tick);
+
 #endif /* MOB_HPP */

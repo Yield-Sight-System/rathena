@@ -41,8 +41,9 @@ struct path_node {
 
 /// Binary heap of path nodes
 BHEAP_STRUCT_DECL(node_heap, struct path_node*);
-static BHEAP_STRUCT_VAR(node_heap, g_open_set);	// use static heap for all path calculations
-												// it get's initialized in do_init_path, freed in do_final_path.
+thread_local static BHEAP_STRUCT_VAR(node_heap, g_open_set);	// Thread-local heap for path calculations
+																// Each thread gets its own instance for thread-safe parallel pathfinding.
+																// Initialized on first use per thread, cleaned up on thread exit.
 
 
 /// Comparator for binary heap of path nodes (minimum cost at top)
@@ -264,7 +265,7 @@ static int32 add_path(struct node_heap *heap, struct path_node *tp, int16 x, int
  * flag: &2 = call path_search_long instead
  * cell: type of obstruction to check for
  *
- * Note: uses global g_open_set, therefore this method can't be called in parallel or recursivly.
+ * Note: Now thread-safe via thread_local storage. Multiple threads can call path_search() in parallel.
  *------------------------------------------*/
 bool path_search(struct walkpath_data *wpd, int16 m, int16 x0, int16 y0, int16 x1, int16 y1, int32 flag, cell_chk cell)
 {

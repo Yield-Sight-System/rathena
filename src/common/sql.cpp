@@ -1018,6 +1018,329 @@ void Sql_Init(void) {
 	Sql_inter_server_read(INTER_CONF_NAME,true);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Async Database Operations Implementation
+///////////////////////////////////////////////////////////////////////////////
+
+#include "threading.hpp"
+#include <chrono>
+#include <mutex>
+
+// Global queue for completed async queries
+static ThreadSafeQueue<AsyncQueryTask*> g_completed_db_queries;
+
+// Statistics tracking
+static std::atomic<uint64> g_total_async_queries{0};
+static std::atomic<uint64> g_total_query_time_us{0};
+static std::mutex g_async_init_mutex;
+static bool g_async_initialized = false;
+
+// Forward declarations for thread pool
+extern ThreadPool* g_db_worker_pool;
+
+#ifdef MAPSERVER
+extern struct Battle_Config battle_config;
+#endif
+
+/**
+ * Check if async DB operations are enabled
+ */
+static bool is_async_enabled() {
+#ifdef MAPSERVER
+	return battle_config.enable_threading && battle_config.enable_db_async && g_db_worker_pool != nullptr;
+#else
+	// For non-map servers, check if DB worker pool exists
+	return g_db_worker_pool != nullptr;
+#endif
+}
+
+/**
+ * Initialize async database system
+ */
+void Sql_InitAsync(void) {
+	std::lock_guard<std::mutex> lock(g_async_init_mutex);
+	
+	if (g_async_initialized) {
+		return;
+	}
+	
+	ShowInfo("Initializing async database system...\n");
+	g_async_initialized = true;
+	
+	// Reset statistics
+	g_total_async_queries.store(0);
+	g_total_query_time_us.store(0);
+	
+	ShowInfo("Async database system initialized\n");
+}
+
+/**
+ * Shutdown async database system
+ */
+void Sql_ShutdownAsync(void) {
+	std::lock_guard<std::mutex> lock(g_async_init_mutex);
+	
+	if (!g_async_initialized) {
+		return;
+	}
+	
+	ShowInfo("Shutting down async database system...\n");
+	
+	// Process any remaining completed queries
+	int32 remaining = Sql_ProcessCompletedQueries();
+	if (remaining > 0) {
+		ShowWarning("Processed %d remaining async queries during shutdown\n", remaining);
+	}
+	
+	g_async_initialized = false;
+	ShowInfo("Async database system shutdown complete\n");
+}
+
+/**
+ * Submit async query (va_list version)
+ */
+bool Sql_QueryAsyncV(Sql* sql, const char* query, AsyncQueryCallback callback, void* user_data, va_list args) {
+	if (!sql || !query) {
+		ShowError("Sql_QueryAsyncV: Invalid parameters (sql=%p, query=%p)\n", sql, query);
+		return false;
+	}
+	
+	// Check if async is enabled
+	if (!is_async_enabled()) {
+		// Fallback to synchronous execution
+		int32 result = Sql_QueryV(sql, query, args);
+		
+		if (callback) {
+			callback(result == SQL_SUCCESS, user_data);
+		}
+		
+		return true;
+	}
+	
+	// Create async task
+	AsyncQueryTask* task = new AsyncQueryTask();
+	task->sql_handle = sql;
+	task->callback = callback;
+	task->user_data = user_data;
+	task->submit_tick = gettick();
+	
+	// Format query string
+	StringBuf buf;
+	StringBuf_Init(&buf);
+	StringBuf_Vprintf(&buf, query, args);
+	task->query = StringBuf_Value(&buf);
+	StringBuf_Destroy(&buf);
+	
+#ifdef MAPSERVER
+	if (battle_config.verbose_threading) {
+		ShowInfo("[Async DB] Submitting query: %.80s%s\n",
+		         task->query.c_str(),
+		         task->query.length() > 80 ? "..." : "");
+	}
+#endif
+	
+	// Increment statistics
+	g_total_async_queries.fetch_add(1, std::memory_order_relaxed);
+	
+	// Submit to DB worker pool
+	g_db_worker_pool->submit([task]() {
+		auto start = std::chrono::high_resolution_clock::now();
+		
+		// Execute query in worker thread
+		int32 result = mysql_real_query(&task->sql_handle->handle,
+		                                task->query.c_str(),
+		                                (unsigned long)task->query.length());
+		
+		task->success = (result == 0);
+		
+		if (task->success) {
+			// Store result metadata
+			task->affected_rows = mysql_affected_rows(&task->sql_handle->handle);
+			task->insert_id = mysql_insert_id(&task->sql_handle->handle);
+			
+			// For SELECT queries, store the result
+			task->result = mysql_store_result(&task->sql_handle->handle);
+		} else {
+			// Store error information
+			task->error_msg = mysql_error(&task->sql_handle->handle);
+			task->result = nullptr;
+		}
+		
+		auto end = std::chrono::high_resolution_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+		g_total_query_time_us.fetch_add(duration.count(), std::memory_order_relaxed);
+		
+		// Add to completed queue (will be processed in main thread)
+		g_completed_db_queries.push(task);
+	});
+	
+	return true;
+}
+
+/**
+ * Submit async query (printf-style)
+ */
+bool Sql_QueryAsync(Sql* sql, const char* query, AsyncQueryCallback callback, void* user_data, ...) {
+	va_list args;
+	va_start(args, user_data);
+	bool result = Sql_QueryAsyncV(sql, query, callback, user_data, args);
+	va_end(args);
+	return result;
+}
+
+/**
+ * Submit async query (string version)
+ */
+bool Sql_QueryAsyncStr(Sql* sql, const char* query, AsyncQueryCallback callback, void* user_data) {
+	if (!sql || !query) {
+		ShowError("Sql_QueryAsyncStr: Invalid parameters (sql=%p, query=%p)\n", sql, query);
+		return false;
+	}
+	
+	// Check if async is enabled
+	if (!is_async_enabled()) {
+		// Fallback to synchronous execution
+		int32 result = Sql_QueryStr(sql, query);
+		
+		if (callback) {
+			callback(result == SQL_SUCCESS, user_data);
+		}
+		
+		return true;
+	}
+	
+	// Create async task
+	AsyncQueryTask* task = new AsyncQueryTask();
+	task->sql_handle = sql;
+	task->callback = callback;
+	task->user_data = user_data;
+	task->submit_tick = gettick();
+	task->query = query;
+	
+#ifdef MAPSERVER
+	if (battle_config.verbose_threading) {
+		ShowInfo("[Async DB] Submitting query: %.80s%s\n",
+		         task->query.c_str(),
+		         task->query.length() > 80 ? "..." : "");
+	}
+#endif
+	
+	// Increment statistics
+	g_total_async_queries.fetch_add(1, std::memory_order_relaxed);
+	
+	// Submit to DB worker pool
+	g_db_worker_pool->submit([task]() {
+		auto start = std::chrono::high_resolution_clock::now();
+		
+		// Execute query in worker thread
+		int32 result = mysql_real_query(&task->sql_handle->handle,
+		                                task->query.c_str(),
+		                                (unsigned long)task->query.length());
+		
+		task->success = (result == 0);
+		
+		if (task->success) {
+			// Store result metadata
+			task->affected_rows = mysql_affected_rows(&task->sql_handle->handle);
+			task->insert_id = mysql_insert_id(&task->sql_handle->handle);
+			
+			// For SELECT queries, store the result
+			task->result = mysql_store_result(&task->sql_handle->handle);
+		} else {
+			// Store error information
+			task->error_msg = mysql_error(&task->sql_handle->handle);
+			task->result = nullptr;
+		}
+		
+		auto end = std::chrono::high_resolution_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+		g_total_query_time_us.fetch_add(duration.count(), std::memory_order_relaxed);
+		
+		// Add to completed queue (will be processed in main thread)
+		g_completed_db_queries.push(task);
+	});
+	
+	return true;
+}
+
+/**
+ * Process completed async queries
+ * Must be called from main thread
+ */
+int32 Sql_ProcessCompletedQueries(void) {
+	int32 processed = 0;
+	AsyncQueryTask* task;
+	
+	// Process all completed queries
+	while (g_completed_db_queries.try_pop(task)) {
+		t_tick elapsed = gettick() - task->submit_tick;
+		
+		// Check for errors
+		if (!task->success) {
+#ifdef MAPSERVER
+			if (battle_config.verbose_threading) {
+				ShowWarning("[Async DB] Query failed after %" PRIu64 "ms: %s\n",
+				           (uint64)elapsed, task->error_msg.c_str());
+				ShowWarning("[Async DB] Query was: %.200s%s\n",
+				           task->query.c_str(),
+				           task->query.length() > 200 ? "..." : "");
+			} else {
+#endif
+				ShowSQL("[Async DB] Query failed: %s\n", task->error_msg.c_str());
+#ifdef MAPSERVER
+			}
+#endif
+		}
+#ifdef MAPSERVER
+		else if (battle_config.verbose_threading) {
+			ShowInfo("[Async DB] Query completed in %" PRIu64 "ms (affected: %" PRIu64 " rows)\n",
+			         (uint64)elapsed, task->affected_rows);
+		}
+#endif
+		
+		// Invoke callback if provided
+		if (task->callback) {
+			task->callback(task->success, task->user_data);
+		}
+		
+		// Free result if it exists
+		if (task->result) {
+			mysql_free_result(task->result);
+			task->result = nullptr;
+		}
+		
+		// Clean up task
+		delete task;
+		processed++;
+	}
+	
+	return processed;
+}
+
+/**
+ * Get async database statistics
+ */
+void Sql_GetAsyncStats(uint64* total_queries, uint64* pending_queries, uint64* avg_query_time_us) {
+	if (total_queries) {
+		*total_queries = g_total_async_queries.load(std::memory_order_relaxed);
+	}
+	
+	if (pending_queries) {
+		*pending_queries = g_completed_db_queries.size();
+	}
+	
+	if (avg_query_time_us) {
+		uint64 total_queries_val = g_total_async_queries.load(std::memory_order_relaxed);
+		uint64 total_time = g_total_query_time_us.load(std::memory_order_relaxed);
+		
+		if (total_queries_val > 0) {
+			*avg_query_time_us = total_time / total_queries_val;
+		} else {
+			*avg_query_time_us = 0;
+		}
+	}
+}
+
 #ifdef my_bool
 #undef my_bool
 #endif

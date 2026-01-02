@@ -6,6 +6,9 @@
 
 #include <cstdarg>// va_list
 #include <stdexcept>
+#include <functional>
+#include <string>
+#include <atomic>
 
 #ifdef WIN32
 #include "winapi.hpp"
@@ -15,6 +18,7 @@
 
 #include "cbasetypes.hpp"
 #include "strlib.hpp"
+#include "timer.hpp"
 
 // Return codes
 #define SQL_ERROR -1
@@ -64,6 +68,51 @@ struct Sql;// Sql handle (private access)
 typedef enum SqlDataType SqlDataType;
 typedef struct Sql Sql;
 
+///////////////////////////////////////////////////////////////////////////////
+// Async Database Operations
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Callback type for async query completion
+ * Invoked in main thread when async query completes
+ *
+ * @param success True if query succeeded, false if error
+ * @param user_data User-provided context passed to async query
+ */
+using AsyncQueryCallback = std::function<void(bool success, void* user_data)>;
+
+/**
+ * Async database query task
+ * Executed in DB worker thread, callback invoked in main thread
+ */
+struct AsyncQueryTask {
+	std::string query;              // SQL query string
+	AsyncQueryCallback callback;    // Completion callback (optional)
+	void* user_data;                // User-provided context
+	Sql* sql_handle;               // DB connection to use
+	t_tick submit_tick;            // When task was submitted (for metrics)
+	
+	// Result data (filled by worker thread)
+	bool success;                   // Query succeeded
+	std::string error_msg;         // Error message if failed
+	uint64 affected_rows;          // Rows affected by INSERT/UPDATE/DELETE
+	uint64 insert_id;              // Last insert ID for AUTO_INCREMENT
+	MYSQL_RES* result;             // Query result (for SELECT queries)
+	
+	AsyncQueryTask()
+		: user_data(nullptr)
+		, sql_handle(nullptr)
+		, submit_tick(0)
+		, success(false)
+		, affected_rows(0)
+		, insert_id(0)
+		, result(nullptr)
+	{}
+	
+	~AsyncQueryTask() {
+		// Result is freed by the caller after processing
+	}
+};
 
 /// Allocates and initializes a new Sql handle.
 struct Sql* Sql_Malloc(void);
@@ -340,5 +389,76 @@ public:
 #endif
 
 void Sql_Init(void);
+
+///////////////////////////////////////////////////////////////////////////////
+// Async Database Functions
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Submit an async database query
+ * Query is executed in DB worker thread, callback invoked in main thread
+ * Falls back to synchronous execution if threading is disabled
+ *
+ * @param sql SQL handle to use (must not be used for other queries until callback completes)
+ * @param query SQL query string (printf-style format)
+ * @param callback Completion callback (optional, can be nullptr for fire-and-forget)
+ * @param user_data User context passed to callback
+ * @param ... Format arguments for query string
+ * @return true if submitted successfully, false on error
+ */
+bool Sql_QueryAsync(Sql* sql, const char* query, AsyncQueryCallback callback, void* user_data, ...);
+
+/**
+ * Submit an async database query (va_list version)
+ *
+ * @param sql SQL handle to use
+ * @param query SQL query string (printf-style format)
+ * @param callback Completion callback (optional)
+ * @param user_data User context passed to callback
+ * @param args Format arguments for query string
+ * @return true if submitted successfully, false on error
+ */
+bool Sql_QueryAsyncV(Sql* sql, const char* query, AsyncQueryCallback callback, void* user_data, va_list args);
+
+/**
+ * Submit an async database query (string version)
+ *
+ * @param sql SQL handle to use
+ * @param query SQL query string (already formatted)
+ * @param callback Completion callback (optional)
+ * @param user_data User context passed to callback
+ * @return true if submitted successfully, false on error
+ */
+bool Sql_QueryAsyncStr(Sql* sql, const char* query, AsyncQueryCallback callback, void* user_data);
+
+/**
+ * Process completed async queries
+ * Must be called regularly from main thread (typically in main event loop)
+ * Invokes callbacks for all completed queries since last call
+ *
+ * @return Number of queries processed
+ */
+int32 Sql_ProcessCompletedQueries(void);
+
+/**
+ * Get statistics about async database operations
+ *
+ * @param total_queries Total number of async queries submitted
+ * @param pending_queries Number of queries currently pending
+ * @param avg_query_time_us Average query execution time in microseconds
+ */
+void Sql_GetAsyncStats(uint64* total_queries, uint64* pending_queries, uint64* avg_query_time_us);
+
+/**
+ * Initialize async database system
+ * Called automatically during server startup
+ */
+void Sql_InitAsync(void);
+
+/**
+ * Shutdown async database system
+ * Called automatically during server shutdown
+ */
+void Sql_ShutdownAsync(void);
 
 #endif /* SQL_HPP */

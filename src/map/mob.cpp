@@ -4,13 +4,16 @@
 #include "mob.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <map>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
 #include <common/cbasetypes.hpp>
+#include <common/core.hpp>
 #include <common/db.hpp>
 #include <common/ers.hpp>
 #include <common/malloc.hpp>
@@ -20,6 +23,7 @@
 #include <common/socket.hpp>
 #include <common/strlib.hpp>
 #include <common/timer.hpp>
+#include <common/threading.hpp>
 #include <common/utilities.hpp>
 #include <common/utils.hpp>
 
@@ -2216,8 +2220,239 @@ static bool mob_ai_sub_hard(mob_data *md, t_tick tick)
 	return true;
 }
 
+/*==========================================
+	* Thread-safe mob AI implementation
+	* These functions enable parallel mob AI processing using worker threads
+	*------------------------------------------*/
+
 /**
- * End of attack timer event
+	* Creates an immutable snapshot of mob state for thread-safe AI processing
+	* This function runs in the main thread during snapshot collection phase
+	*
+	* @param md: Pointer to mob data
+	* @param tick: Current server tick
+	* @return Snapshot containing all data needed for AI computation
+	*/
+mob_ai_snapshot mob_create_ai_snapshot(mob_data* md, t_tick tick) {
+	nullpo_retr(mob_ai_snapshot(), md);
+	
+	mob_ai_snapshot snapshot = {};
+	
+	// Basic identification
+	snapshot.mob_id = md->bl.id;
+	snapshot.mob_class = md->mob_id;
+	
+	// Position
+	snapshot.m = md->bl.m;
+	snapshot.x = md->bl.x;
+	snapshot.y = md->bl.y;
+	
+	// Health
+	snapshot.hp = md->status.hp;
+	snapshot.max_hp = md->status.max_hp;
+	
+	// AI state
+	snapshot.skillstate = md->state.skillstate;
+	snapshot.aggressive = md->state.aggressive;
+	snapshot.can_move = (status_get_mode(md) & MD_CANMOVE) && unit_can_move(md);
+	snapshot.is_blind = md->sc.getSCE(SC_BLIND) != nullptr;
+	snapshot.provoke_flag = md->state.provoke_flag;
+	
+	// Targeting - include target position to avoid map_id2bl() in worker threads
+	snapshot.target_id = md->target_id;
+	if (md->target_id) {
+		block_list* tbl = map_id2bl(md->target_id);
+		if (tbl) {
+			snapshot.target_x = tbl->x;
+			snapshot.target_y = tbl->y;
+		} else {
+			snapshot.target_x = 0;
+			snapshot.target_y = 0;
+			snapshot.target_id = 0; // Target no longer exists
+		}
+	} else {
+		snapshot.target_x = 0;
+		snapshot.target_y = 0;
+	}
+	
+	snapshot.attacked_id = md->attacked_id;
+	snapshot.master_id = md->master_id;
+	snapshot.has_master = md->master_id > 0;
+	
+	// Combat parameters
+	snapshot.attack_range = md->status.rhw.range;
+	snapshot.view_range = snapshot.is_blind ? 1 : md->db->range2;
+	snapshot.chase_range = md->db->range3;
+	snapshot.mode = status_get_mode(md);
+	
+	// Movement state
+	snapshot.walktimer_active = md->ud.walktimer != INVALID_TIMER;
+	snapshot.walk_to_x = md->ud.to_x;
+	snapshot.walk_to_y = md->ud.to_y;
+	snapshot.walk_path_pos = md->ud.walkpath.path_pos;
+	
+	// Timing
+	snapshot.next_walktime = md->next_walktime;
+	snapshot.last_linktime = md->last_linktime;
+	
+	// Special
+	snapshot.bg_id = md->bg_id;
+	snapshot.special_ai = md->special_state.ai;
+	
+	return snapshot;
+}
+
+/**
+	* Thread-safe AI computation - runs in worker threads
+	* Computes what action the mob should take based on its snapshot state
+	* Does NOT modify any global state or call unsafe functions
+	*
+	* @param snapshot: Immutable mob state snapshot
+	* @param tick: Current server tick (snapshotted)
+	* @return AI decision result to be applied by main thread
+	*/
+mob_ai_result mob_ai_compute_threadsafe(const mob_ai_snapshot& snapshot, t_tick tick) {
+	mob_ai_result result;
+	result.mob_id = snapshot.mob_id;
+	result.action = mob_ai_result::AI_ACTION_NONE;
+	
+	// Dead mobs do nothing
+	if (snapshot.hp <= 0) {
+		return result;
+	}
+	
+	// Check if we have a valid target
+	if (snapshot.target_id <= 0) {
+		// No target - unlock if needed and go idle
+		result.action = mob_ai_result::AI_ACTION_UNLOCK_TARGET;
+		return result;
+	}
+	
+	// Calculate distance to target
+	int32 distance = distance_xy(snapshot.x, snapshot.y, snapshot.target_x, snapshot.target_y);
+	
+	// Decision tree based on distance and state
+	if (distance <= snapshot.attack_range) {
+		// Target is in attack range - attack it
+		result.action = mob_ai_result::AI_ACTION_ATTACK;
+		result.target_id = snapshot.target_id;
+		return result;
+	}
+	
+	// Target is out of attack range but within chase range
+	if (distance <= snapshot.chase_range && snapshot.can_move) {
+		// Chase the target
+		result.action = mob_ai_result::AI_ACTION_MOVE;
+		result.target_id = snapshot.target_id;
+		result.move_x = snapshot.target_x;
+		result.move_y = snapshot.target_y;
+		return result;
+	}
+	
+	// Target too far away - unlock target
+	result.action = mob_ai_result::AI_ACTION_UNLOCK_TARGET;
+	return result;
+}
+
+/**
+	* Applies AI computation result to actual game state
+	* This function MUST run in the main thread only
+	* Validates that mob still exists and applies the computed action
+	*
+	* @param result: AI decision result from worker thread
+	* @param tick: Current server tick
+	*/
+void mob_ai_apply_result(const mob_ai_result& result, t_tick tick) {
+	// Find the mob by ID
+	block_list* bl = map_id2bl(result.mob_id);
+	if (!bl || bl->type != BL_MOB) {
+		// Mob no longer exists (died or was removed during processing)
+		return;
+	}
+	
+	mob_data* md = (mob_data*)bl;
+	
+	// Validate mob is still alive and active
+	if (md->prev == nullptr || md->status.hp == 0) {
+		return;
+	}
+	
+	// Apply the action
+	switch (result.action) {
+		case mob_ai_result::AI_ACTION_NONE:
+			// Do nothing - mob continues current behavior
+			break;
+			
+		case mob_ai_result::AI_ACTION_MOVE:
+		{
+			// Validate target still exists before moving
+			block_list* target = map_id2bl(result.target_id);
+			if (target && target->m == md->bl.m) {
+				// Attempt to walk to target
+				// This preserves the original AI behavior
+				if (!unit_walktobl(md, target, md->status.rhw.range, 2)) {
+					// Failed to path to target - unlock it
+					mob_unlocktarget(md, tick);
+				} else {
+					// Successfully started walking
+					mob_setstate(*md, mob_is_chasing(md->state.skillstate) ? md->state.skillstate : MSS_RUSH);
+				}
+			} else {
+				// Target no longer valid - unlock
+				mob_unlocktarget(md, tick);
+			}
+			break;
+		}
+		
+		case mob_ai_result::AI_ACTION_ATTACK:
+		{
+			// Validate target still exists and is in range before attacking
+			block_list* target = map_id2bl(result.target_id);
+			if (target && battle_check_range(md, target, md->status.rhw.range)) {
+				// Target in range - attack
+				if (md->ud.target != target->id || md->ud.attacktimer == INVALID_TIMER) {
+					int32 stop_flag = unit_attack(md, target->id, 1);
+					if (stop_flag != USW_NONE) {
+						unit_stop_walking(md, stop_flag);
+					}
+				}
+				mob_setstate(*md, MSS_BERSERK);
+			} else {
+				// Target moved out of range or doesn't exist - try to chase or unlock
+				if (target && target->m == md->bl.m) {
+					// Try to walk closer
+					unit_walktobl(md, target, md->status.rhw.range, 2);
+				} else {
+					mob_unlocktarget(md, tick);
+				}
+			}
+			break;
+		}
+		
+		case mob_ai_result::AI_ACTION_UNLOCK_TARGET:
+		{
+			// Clear target and go idle
+			mob_unlocktarget(md, tick);
+			break;
+		}
+		
+		case mob_ai_result::AI_ACTION_SKILL:
+		{
+			// Skill usage - reserved for Phase 4b-3 (advanced features)
+			// For now, treat as no action
+			break;
+		}
+		
+		default:
+			// Unknown action - log warning
+			ShowWarning("mob_ai_apply_result: Unknown action type %d for mob %d\n",
+			            result.action, result.mob_id);
+			break;
+	}
+}
+
+/**
+	* End of attack timer event
  * This is so we can call the mob AI at the end of an attack timer and don't need to wait until the next AI interval
  * Also, mob AI checks that are triggered at the end of attack delay are currently handled here
  * @param md Monster to execute the AI for
@@ -2463,16 +2698,206 @@ static TIMER_FUNC(mob_ai_lazy){
 }
 
 /*==========================================
- * Serious processing for mob in PC field of view   (interval timer function)
+ * Helper to collect mobs for AI processing
+ * Callback for map_foreachmob during snapshot collection
  *------------------------------------------*/
-static TIMER_FUNC(mob_ai_hard){
-
-	if (battle_config.mob_ai&0x20)
-		map_foreachmob(mob_ai_sub_lazy,tick);
-	else
-		map_foreachpc(mob_ai_sub_foreachclient,tick);
-
+static int32 mob_ai_collect_for_threading(block_list* bl, va_list ap) {
+	mob_data* md = (mob_data*)bl;
+	std::vector<mob_data*>* mob_list = va_arg(ap, std::vector<mob_data*>*);
+	t_tick tick = va_arg(ap, t_tick);
+	
+	// Same filtering as mob_ai_sub_hard_timer
+	if (md->prev == nullptr)
+		return 0;
+	
+	// Add to collection for processing
+	mob_list->push_back(md);
+	
+	// Update last_pcneartime for active AI tracking
+	// This matches the behavior of mob_ai_sub_hard_timer
+	md->last_pcneartime = tick;
+	
 	return 0;
+}
+
+/**
+ * Helper to collect mobs near a specific player for AI processing
+ * Callback for use within map_foreachpc during snapshot collection
+ *------------------------------------------*/
+static int32 mob_ai_collect_near_player(block_list* bl, va_list ap) {
+	mob_data* md = (mob_data*)bl;
+	std::vector<mob_data*>* mob_list = va_arg(ap, std::vector<mob_data*>*);
+	uint32 char_id = va_arg(ap, uint32);
+	t_tick tick = va_arg(ap, t_tick);
+	
+	if (md->prev == nullptr)
+		return 0;
+	
+	// Add spotted tracking (matches mob_ai_sub_hard_timer behavior)
+	mob_add_spotted(md, char_id);
+	
+	// Check if already in list to avoid duplicates from multiple players
+	for (mob_data* existing : *mob_list) {
+		if (existing->bl.id == md->bl.id)
+			return 0; // Already collected
+	}
+	
+	mob_list->push_back(md);
+	md->last_pcneartime = tick;
+	
+	return 0;
+}
+
+/**
+ * Helper to collect mobs near players for AI processing
+ * Callback for map_foreachpc during snapshot collection
+ *------------------------------------------*/
+static int32 mob_ai_collect_foreachclient(map_session_data* sd, va_list ap) {
+	std::vector<mob_data*>* mob_list = va_arg(ap, std::vector<mob_data*>*);
+	t_tick tick = va_arg(ap, t_tick);
+	
+	// Find all mobs in range of this player
+	map_foreachinallrange(mob_ai_collect_near_player, sd, AREA_SIZE + ACTIVE_AI_RANGE,
+	                      BL_MOB, mob_list, sd->status.char_id, tick);
+	
+	return 0;
+}
+
+/**
+ * Parallel mob AI processing using worker threads
+ * Creates snapshots, computes AI in parallel, applies results in main thread
+ *
+ * @param tick: Current server tick
+ * @return Number of mobs processed
+ */
+static int32 mob_ai_hard_threaded(t_tick tick) {
+	static std::vector<mob_data*> mob_list;
+	static std::vector<mob_ai_snapshot> snapshots;
+	static std::vector<mob_ai_result> results;
+	static std::mutex results_mutex;
+	
+	mob_list.clear();
+	snapshots.clear();
+	results.clear();
+	
+	// Phase 1: Collect mobs to process (matches original behavior)
+	if (battle_config.mob_ai & 0x20) {
+		// Process all mobs on all maps
+		map_foreachmob(mob_ai_collect_for_threading, &mob_list, tick);
+	} else {
+		// Process only mobs near players
+		map_foreachpc(mob_ai_collect_foreachclient, &mob_list, tick);
+	}
+	
+	if (mob_list.empty()) {
+		return 0; // No mobs to process
+	}
+	
+	// Phase 2: Create immutable snapshots (main thread, fast)
+	snapshots.reserve(mob_list.size());
+	for (mob_data* md : mob_list) {
+		// Double-check mob is still valid
+		if (md->prev == nullptr || md->status.hp == 0)
+			continue;
+			
+		mob_ai_snapshot snapshot = mob_create_ai_snapshot(md, tick);
+		snapshots.push_back(snapshot);
+	}
+	
+	if (snapshots.empty()) {
+		return 0;
+	}
+	
+	// Verbose logging
+	if (battle_config.verbose_threading) {
+		ShowInfo("[Mob AI Threading] Processing %zu mobs using %zu worker threads\n",
+		         snapshots.size(), get_cpu_worker_pool()->num_threads());
+	}
+	
+	// Phase 3: Submit AI computation tasks to worker threads (parallel)
+	ThreadPool* pool = get_cpu_worker_pool();
+	std::atomic<size_t> completed{0};
+	
+	for (const auto& snapshot : snapshots) {
+		pool->submit([snapshot, tick, &results, &results_mutex, &completed]() {
+			// Compute AI decision (thread-safe, read-only operations)
+			mob_ai_result result = mob_ai_compute_threadsafe(snapshot, tick);
+			
+			// Store result (needs lock for thread-safe vector access)
+			{
+				std::lock_guard<std::mutex> lock(results_mutex);
+				results.push_back(result);
+			}
+			
+			// Increment completion counter
+			completed.fetch_add(1, std::memory_order_release);
+		});
+	}
+	
+	// Phase 4: Wait for all tasks to complete (busy-wait with yield)
+	// Using atomic counter avoids lock contention
+	size_t expected = snapshots.size();
+	while (completed.load(std::memory_order_acquire) < expected) {
+		std::this_thread::yield(); // Give CPU to worker threads
+	}
+	
+	// Phase 5: Apply results in main thread (safe state modification)
+	for (const auto& result : results) {
+		mob_ai_apply_result(result, tick);
+	}
+	
+	if (battle_config.verbose_threading) {
+		ShowInfo("[Mob AI Threading] Completed processing %zu mobs\n", results.size());
+	}
+	
+	return static_cast<int32>(results.size());
+}
+
+/**
+ * Sequential mob AI processing (original non-threaded behavior)
+ * Used when threading is disabled or unavailable
+ *
+ * @param tick: Current server tick
+ * @return 0
+ */
+static int32 mob_ai_hard_sequential(t_tick tick) {
+	// Original behavior - unchanged
+	if (battle_config.mob_ai & 0x20)
+		map_foreachmob(mob_ai_sub_lazy, tick);
+	else
+		map_foreachpc(mob_ai_sub_foreachclient, tick);
+	
+	return 0;
+}
+
+/*==========================================
+ * Serious processing for mob in PC field of view (interval timer function)
+ *
+ * This function is called every MIN_MOBTHINKTIME (100ms) by the timer system.
+ * It processes mob AI either sequentially (original behavior) or in parallel (threaded).
+ *
+ * Threading behavior:
+ * - If threading is enabled and configured: Uses worker threads (mob_ai_hard_threaded)
+ * - Otherwise: Uses original sequential processing (mob_ai_hard_sequential)
+ *
+ * Configuration:
+ * - battle_config.enable_threading: Master threading switch
+ * - battle_config.enable_mob_threading: Mob-specific threading switch
+ * - is_threading_enabled(): Check if thread pool is available
+ *------------------------------------------*/
+static TIMER_FUNC(mob_ai_hard) {
+	// Determine if we should use threaded AI processing
+	bool use_threading = battle_config.enable_threading &&
+	                     battle_config.enable_mob_threading &&
+	                     is_threading_enabled();
+	
+	if (use_threading) {
+		// Parallel processing using worker threads
+		return mob_ai_hard_threaded(tick);
+	} else {
+		// Sequential processing (original behavior)
+		return mob_ai_hard_sequential(tick);
+	}
 }
 
 /**

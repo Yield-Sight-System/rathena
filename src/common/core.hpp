@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "timer.hpp"
+#include "threading.hpp"
 
 #ifdef _WIN32
 	#include "winapi.hpp" // Console close event handling
@@ -91,6 +92,24 @@ public:
 }
 
 extern rathena::server_core::Core* global_core;
+
+// Global thread pool instances (declared in core.cpp)
+extern ThreadPool* g_cpu_worker_pool;
+extern ThreadPool* g_db_worker_pool;
+
+// Thread pool accessor functions (inline for performance)
+inline ThreadPool* get_cpu_worker_pool() {
+	return g_cpu_worker_pool;
+}
+
+inline ThreadPool* get_db_worker_pool() {
+	return g_db_worker_pool;
+}
+
+// Check if threading is available
+inline bool is_threading_enabled() {
+	return g_cpu_worker_pool != nullptr;
+}
 
 template <typename T> int32 main_core( int32 argc, char *argv[] ){
 	T server = {};

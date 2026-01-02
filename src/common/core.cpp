@@ -5,6 +5,7 @@
 
 #include <cstdlib>
 #include <csignal>
+#include <thread>
 
 #include <config/core.hpp>
 
@@ -42,6 +43,10 @@
 using namespace rathena::server_core;
 
 Core* global_core = nullptr;
+
+// Global thread pool instances
+ThreadPool* g_cpu_worker_pool = nullptr;
+ThreadPool* g_db_worker_pool = nullptr;
 
 #if defined(BUILDBOT)
 	int32 buildbotflag = 0;
@@ -330,6 +335,108 @@ void usercheck(void)
 #endif
 }
 
+#ifndef MINICORE
+/*======================================
+ * Helper function to detect CPU count
+ *--------------------------------------*/
+static size_t detect_cpu_count() {
+	size_t count = std::thread::hardware_concurrency();
+	if (count == 0) {
+		ShowWarning("Failed to detect CPU count, defaulting to 4 threads\n");
+		count = 4;
+	}
+	return count;
+}
+
+/*======================================
+ * Initialize thread pools
+ *--------------------------------------*/
+static void init_thread_pools() {
+	// Forward declare battle_config for conditional compilation
+	#ifdef MAPSERVER
+	extern struct Battle_Config battle_config;
+	#endif
+	
+	size_t cpu_threads = 0;  // Will be set based on config
+	size_t db_threads = 4;   // Default
+	bool threading_enabled = true;
+	bool verbose = false;
+	
+	#ifdef MAPSERVER
+	// Map server uses battle_config
+	if (!battle_config.enable_threading) {
+		ShowInfo("Threading disabled by configuration, running in single-threaded mode\n");
+		return;
+	}
+	
+	cpu_threads = battle_config.cpu_worker_threads;
+	db_threads = battle_config.db_worker_threads;
+	verbose = battle_config.verbose_threading != 0;
+	
+	if (verbose) {
+		ShowInfo("Threading configuration:\n");
+		ShowInfo("  CPU workers: %d (0 = auto)\n", battle_config.cpu_worker_threads);
+		ShowInfo("  DB workers: %d\n", battle_config.db_worker_threads);
+		ShowInfo("  Mob AI threading: %s\n", battle_config.enable_mob_threading ? "enabled" : "disabled");
+		ShowInfo("  Pathfinding threading: %s\n", battle_config.enable_pathfinding_threading ? "enabled" : "disabled");
+	}
+	#else
+	// Login/Char servers use conservative defaults
+	cpu_threads = 0;  // Auto-detect
+	db_threads = 4;
+	ShowInfo("Threading enabled for non-map server\n");
+	#endif
+	
+	// Auto-detect CPU count if set to 0
+	if (cpu_threads == 0) {
+		cpu_threads = detect_cpu_count();
+		ShowInfo("Auto-detected %zu CPU cores\n", cpu_threads);
+	}
+	
+	// Create CPU worker pool
+	try {
+		g_cpu_worker_pool = new ThreadPool(cpu_threads);
+		ShowInfo("CPU worker pool initialized with %zu threads\n", cpu_threads);
+	} catch (const std::exception& e) {
+		ShowError("Failed to create CPU worker pool: %s\n", e.what());
+		ShowError("Continuing in single-threaded mode\n");
+		g_cpu_worker_pool = nullptr;
+		return;
+	}
+	
+	// Create DB worker pool
+	try {
+		g_db_worker_pool = new ThreadPool(db_threads);
+		ShowInfo("Database worker pool initialized with %zu threads\n", db_threads);
+	} catch (const std::exception& e) {
+		ShowError("Failed to create DB worker pool: %s\n", e.what());
+		// Continue with CPU pool only
+		g_db_worker_pool = nullptr;
+	}
+}
+
+/*======================================
+ * Shutdown thread pools
+ *--------------------------------------*/
+static void shutdown_thread_pools() {
+	ShowInfo("Shutting down thread pools...\n");
+	
+	if (g_cpu_worker_pool) {
+		g_cpu_worker_pool->shutdown();  // Graceful shutdown
+		delete g_cpu_worker_pool;
+		g_cpu_worker_pool = nullptr;
+		ShowInfo("CPU worker pool stopped\n");
+	}
+	
+	if (g_db_worker_pool) {
+		g_db_worker_pool->shutdown();
+		delete g_db_worker_pool;
+		g_db_worker_pool = nullptr;
+		ShowInfo("Database worker pool stopped\n");
+	}
+}
+#endif
+
 int32 Core::start( int32 argc, char **argv ){
 	if( this->get_status() != e_core_status::NOT_STARTED) {
 		ShowFatalError( "Core was already started and cannot be started again!\n" );
@@ -379,6 +486,13 @@ int32 Core::start( int32 argc, char **argv ){
 
 	// If initialization did not trigger shutdown
 	if( this->m_status != e_core_status::STOPPING ){
+#ifndef MINICORE
+		// Initialize thread pools after server configuration is loaded
+		init_thread_pools();
+		
+		// Initialize async database system
+		Sql_InitAsync();
+#endif
 		this->set_status( e_core_status::SERVER_INITIALIZED );
 
 		this->set_status( e_core_status::RUNNING );
@@ -401,6 +515,12 @@ int32 Core::start( int32 argc, char **argv ){
 
 	this->set_status( e_core_status::CORE_FINALIZING );
 #ifndef MINICORE
+	// Shutdown async database system before thread pools
+	Sql_ShutdownAsync();
+	
+	// Shutdown thread pools before other cleanups
+	shutdown_thread_pools();
+	
 	timer_final();
 	socket_final();
 	db_final();
@@ -430,6 +550,10 @@ void Core::handle_main( t_tick next ){
 #ifndef MINICORE
 	// By default we handle all socket packets
 	do_sockets( next );
+	
+	// Process completed async database queries
+	// Must be called from main thread to invoke callbacks safely
+	Sql_ProcessCompletedQueries();
 #endif
 }
 

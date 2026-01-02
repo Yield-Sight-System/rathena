@@ -12394,6 +12394,17 @@ static const struct _battle_data {
 	{ "enable_bonus_map_drops",             &battle_config.enable_bonus_map_drops,          1,      0,      1,              },
 	{ "hide_cloaked_units",                 &battle_config.hide_cloaked_units,              0,      0,      BL_ALL,         },
 
+	// Threading configuration
+	{ "enable_threading",                   &battle_config.enable_threading,                1,      0,      1,              },
+	{ "cpu_worker_threads",                 &battle_config.cpu_worker_threads,              0,      0,      64,             },
+	{ "db_worker_threads",                  &battle_config.db_worker_threads,               4,      1,      32,             },
+	{ "enable_mob_threading",               &battle_config.enable_mob_threading,            1,      0,      1,              },
+	{ "enable_pathfinding_threading",       &battle_config.enable_pathfinding_threading,    1,      0,      1,              },
+	{ "enable_battle_threading",            &battle_config.enable_battle_threading,         0,      0,      1,              },
+	{ "enable_db_async",                    &battle_config.enable_db_async,                 0,      0,      1,              },
+	{ "task_queue_limit",                   &battle_config.task_queue_limit,                10000,  0,      INT_MAX,        },
+	{ "verbose_threading",                  &battle_config.verbose_threading,               0,      0,      1,              },
+
 #include <custom/battle_config_init.inc>
 };
 
