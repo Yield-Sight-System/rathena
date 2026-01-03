@@ -359,8 +359,6 @@ static void init_thread_pools() {
 	
 	size_t cpu_threads = 0;  // Will be set based on config
 	size_t db_threads = 4;   // Default
-	bool threading_enabled = true;
-	bool verbose = false;
 	
 	#ifdef MAPSERVER
 	// Map server uses battle_config
@@ -371,7 +369,7 @@ static void init_thread_pools() {
 	
 	cpu_threads = battle_config.cpu_worker_threads;
 	db_threads = battle_config.db_worker_threads;
-	verbose = battle_config.verbose_threading != 0;
+	bool verbose = battle_config.verbose_threading != 0;
 	
 	if (verbose) {
 		ShowInfo("Threading configuration:\n");

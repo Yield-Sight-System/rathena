@@ -2239,13 +2239,13 @@ mob_ai_snapshot mob_create_ai_snapshot(mob_data* md, t_tick tick) {
 	mob_ai_snapshot snapshot = {};
 	
 	// Basic identification
-	snapshot.mob_id = md->bl.id;
+	snapshot.mob_id = md->id;
 	snapshot.mob_class = md->mob_id;
 	
 	// Position
-	snapshot.m = md->bl.m;
-	snapshot.x = md->bl.x;
-	snapshot.y = md->bl.y;
+	snapshot.m = md->m;
+	snapshot.x = md->x;
+	snapshot.y = md->y;
 	
 	// Health
 	snapshot.hp = md->status.hp;
@@ -2329,10 +2329,10 @@ mob_ai_result mob_ai_compute_threadsafe(const mob_ai_snapshot& snapshot, t_tick 
 	}
 	
 	// Calculate distance to target
-	int32 distance = distance_xy(snapshot.x, snapshot.y, snapshot.target_x, snapshot.target_y);
+	int32 dist = distance_xy(snapshot.x, snapshot.y, snapshot.target_x, snapshot.target_y);
 	
 	// Decision tree based on distance and state
-	if (distance <= snapshot.attack_range) {
+	if (dist <= snapshot.attack_range) {
 		// Target is in attack range - attack it
 		result.action = mob_ai_result::AI_ACTION_ATTACK;
 		result.target_id = snapshot.target_id;
@@ -2340,7 +2340,7 @@ mob_ai_result mob_ai_compute_threadsafe(const mob_ai_snapshot& snapshot, t_tick 
 	}
 	
 	// Target is out of attack range but within chase range
-	if (distance <= snapshot.chase_range && snapshot.can_move) {
+	if (dist <= snapshot.chase_range && snapshot.can_move) {
 		// Chase the target
 		result.action = mob_ai_result::AI_ACTION_MOVE;
 		result.target_id = snapshot.target_id;
@@ -2387,7 +2387,7 @@ void mob_ai_apply_result(const mob_ai_result& result, t_tick tick) {
 		{
 			// Validate target still exists before moving
 			block_list* target = map_id2bl(result.target_id);
-			if (target && target->m == md->bl.m) {
+			if (target && target->m == md->m) {
 				// Attempt to walk to target
 				// This preserves the original AI behavior
 				if (!unit_walktobl(md, target, md->status.rhw.range, 2)) {
@@ -2419,7 +2419,7 @@ void mob_ai_apply_result(const mob_ai_result& result, t_tick tick) {
 				mob_setstate(*md, MSS_BERSERK);
 			} else {
 				// Target moved out of range or doesn't exist - try to chase or unlock
-				if (target && target->m == md->bl.m) {
+				if (target && target->m == md->m) {
 					// Try to walk closer
 					unit_walktobl(md, target, md->status.rhw.range, 2);
 				} else {
@@ -2701,8 +2701,7 @@ static TIMER_FUNC(mob_ai_lazy){
  * Helper to collect mobs for AI processing
  * Callback for map_foreachmob during snapshot collection
  *------------------------------------------*/
-static int32 mob_ai_collect_for_threading(block_list* bl, va_list ap) {
-	mob_data* md = (mob_data*)bl;
+static int32 mob_ai_collect_for_threading(mob_data* md, va_list ap) {
 	std::vector<mob_data*>* mob_list = va_arg(ap, std::vector<mob_data*>*);
 	t_tick tick = va_arg(ap, t_tick);
 	
@@ -2738,7 +2737,7 @@ static int32 mob_ai_collect_near_player(block_list* bl, va_list ap) {
 	
 	// Check if already in list to avoid duplicates from multiple players
 	for (mob_data* existing : *mob_list) {
-		if (existing->bl.id == md->bl.id)
+		if (existing->id == md->id)
 			return 0; // Already collected
 	}
 	

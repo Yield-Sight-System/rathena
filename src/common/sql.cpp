@@ -1129,7 +1129,7 @@ bool Sql_QueryAsyncV(Sql* sql, const char* query, AsyncQueryCallback callback, v
 	StringBuf_Init(&buf);
 	StringBuf_Vprintf(&buf, query, args);
 	task->query = StringBuf_Value(&buf);
-	StringBuf_Destroy(&buf);
+	StringBuf_Free(&buf);
 	
 #ifdef MAPSERVER
 	if (battle_config.verbose_threading) {
@@ -1273,7 +1273,7 @@ int32 Sql_ProcessCompletedQueries(void) {
 	
 	// Process all completed queries
 	while (g_completed_db_queries.try_pop(task)) {
-		t_tick elapsed = gettick() - task->submit_tick;
+		[[maybe_unused]] t_tick elapsed = gettick() - task->submit_tick;
 		
 		// Check for errors
 		if (!task->success) {
