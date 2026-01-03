@@ -17,6 +17,12 @@ else()
 	message( STATUS "Disabled server targets (requires common)" )
 endif()
 
+# AI Client library (optional, for AI Sidecar integration)
+option( BUILD_AI_CLIENT "build AI client library for gRPC integration" ON )
+if( BUILD_AI_CLIENT )
+	add_subdirectory( ai_client )
+endif()
+
 
 #
 # targets

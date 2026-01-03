@@ -1,0 +1,653 @@
+syntax = "proto3";
+
+package rathena.ai;
+
+option go_package = "github.com/rathena/ai-world-sidecar/grpc";
+option java_package = "com.rathena.ai";
+option java_outer_classname = "AIServiceProto";
+
+// ============================================================================
+// AI World Service - Main gRPC Service Definition
+// ============================================================================
+
+service AIWorldService {
+  // ===== Core Agent RPCs =====
+  
+  // Dialogue: Generate NPC dialogue based on personality and context
+  rpc Dialogue(DialogueRequest) returns (DialogueResponse);
+  
+  // Decision: Make NPC decisions based on world state
+  rpc Decision(DecisionRequest) returns (DecisionResponse);
+  
+  // GenerateQuest: Create dynamic quests for players
+  rpc GenerateQuest(QuestRequest) returns (QuestResponse);
+  
+  // StoreMemory: Store NPC/world memory
+  rpc StoreMemory(MemoryRequest) returns (MemoryResponse);
+  
+  // RecallMemory: Retrieve relevant memories
+  rpc RecallMemory(MemoryRecallRequest) returns (MemoryRecallResponse);
+  
+  // AnalyzeEconomy: Analyze and balance game economy
+  rpc AnalyzeEconomy(EconomyRequest) returns (EconomyResponse);
+  
+  // ===== Procedural Agent RPCs =====
+  
+  // GenerateNPC: Create dynamic NPCs
+  rpc GenerateNPC(NPCGenerationRequest) returns (NPCGenerationResponse);
+  
+  // GenerateWorldEvent: Create dynamic world events
+  rpc GenerateWorldEvent(WorldEventRequest) returns (WorldEventResponse);
+  
+  // SolveProblem: AI problem solving for quests
+  rpc SolveProblem(ProblemRequest) returns (ProblemResponse);
+  
+  // ===== Progression Agent RPCs =====
+  
+  // GenerateBoss: Create adaptive boss encounters
+  rpc GenerateBoss(BossRequest) returns (BossResponse);
+  
+  // UpdateFaction: Manage faction relationships
+  rpc UpdateFaction(FactionRequest) returns (FactionResponse);
+  
+  // UpdateReputation: Track player reputation
+  rpc UpdateReputation(ReputationRequest) returns (ReputationResponse);
+  
+  // ===== Environmental Agent RPCs =====
+  
+  // GenerateHazard: Create map hazards
+  rpc GenerateHazard(HazardRequest) returns (HazardResponse);
+  
+  // GenerateTreasure: Create treasure hunts
+  rpc GenerateTreasure(TreasureRequest) returns (TreasureResponse);
+  
+  // UpdateWeather: Manage weather and time
+  rpc UpdateWeather(WeatherRequest) returns (WeatherResponse);
+  
+  // ===== Economy/Social Agent RPCs =====
+  
+  // UpdateKarma: Track player karma
+  rpc UpdateKarma(KarmaRequest) returns (KarmaResponse);
+  
+  // AnalyzeMerchantEconomy: Optimize merchant prices
+  rpc AnalyzeMerchantEconomy(MerchantEconomyRequest) returns (MerchantEconomyResponse);
+  
+  // ProcessSocialInteraction: Handle social dynamics
+  rpc ProcessSocialInteraction(SocialInteractionRequest) returns (SocialInteractionResponse);
+  
+  // ===== Advanced Agent RPCs =====
+  
+  // GenerateDungeon: Create adaptive dungeons
+  rpc GenerateDungeon(DungeonRequest) returns (DungeonResponse);
+  
+  // ProcessArchaeology: Handle archaeology system
+  rpc ProcessArchaeology(ArchaeologyRequest) returns (ArchaeologyResponse);
+  
+  // GenerateEventChain: Create linked event chains
+  rpc GenerateEventChain(EventChainRequest) returns (EventChainResponse);
+  
+  // ===== Streaming RPCs =====
+  
+  // StreamWorldEvents: Bidirectional event streaming
+  rpc StreamWorldEvents(stream EventSubscription) returns (stream WorldEvent);
+  
+  // StreamMetrics: Real-time metrics streaming
+  rpc StreamMetrics(MetricsStreamRequest) returns (stream MetricsUpdate);
+  
+  // ===== Management RPCs =====
+  
+  // HealthCheck: Service health verification
+  rpc HealthCheck(HealthRequest) returns (HealthResponse);
+  
+  // GetMetrics: Retrieve service metrics
+  rpc GetMetrics(MetricsRequest) returns (MetricsResponse);
+  
+  // RegisterServer: Register rAthena game server
+  rpc RegisterServer(ServerRegistrationRequest) returns (ServerRegistrationResponse);
+  
+  // UnregisterServer: Unregister game server
+  rpc UnregisterServer(ServerUnregistrationRequest) returns (ServerUnregistrationResponse);
+}
+
+// ============================================================================
+// Core Agent Messages
+// ============================================================================
+
+// ----- Dialogue Messages -----
+
+message DialogueRequest {
+  string server_id = 1;
+  int32 npc_id = 2;
+  int32 player_id = 3;
+  string message = 4;
+  map<string, string> context = 5;
+}
+
+message DialogueResponse {
+  string response = 1;
+  string emotion = 2;
+  float trust_delta = 3;
+  repeated string info_shared = 4;
+  float relationship_level = 5;
+  int32 tokens_used = 6;
+}
+
+// ----- Decision Messages -----
+
+message DecisionRequest {
+  string server_id = 1;
+  int32 npc_id = 2;
+  string situation = 3;
+  repeated string available_actions = 4;
+  map<string, float> world_state = 5;
+}
+
+message DecisionResponse {
+  string chosen_action = 1;
+  float utility_score = 2;
+  map<string, float> all_utilities = 3;
+  string reasoning = 4;
+  int32 confidence_score = 5;
+}
+
+// ----- Quest Messages -----
+
+message QuestRequest {
+  string server_id = 1;
+  int32 player_id = 2;
+  int32 player_level = 3;
+  string location = 4;
+  repeated string completed_quests = 5;
+  string quest_type = 6;
+}
+
+message QuestResponse {
+  int64 quest_id = 1;
+  string quest_type = 2;
+  string difficulty = 3;
+  string title = 4;
+  string description = 5;
+  repeated Objective objectives = 6;
+  repeated Reward rewards = 7;
+  int32 time_limit_minutes = 8;
+  repeated string prerequisites = 9;
+}
+
+message Objective {
+  string type = 1;
+  string description = 2;
+  int32 quantity = 3;
+  int32 target_id = 4;
+  string target_name = 5;
+  bool optional = 6;
+}
+
+message Reward {
+  string type = 1;
+  int32 item_id = 2;
+  int32 quantity = 3;
+  int64 exp = 4;
+  int64 gold = 5;
+  string reward_name = 6;
+}
+
+// ----- Memory Messages -----
+
+message MemoryRequest {
+  string server_id = 1;
+  int32 entity_id = 2;
+  string entity_type = 3;
+  string content = 4;
+  float importance = 5;
+  map<string, string> metadata = 6;
+}
+
+message MemoryResponse {
+  int64 memory_id = 1;
+  bool success = 2;
+  string error_message = 3;
+}
+
+message MemoryRecallRequest {
+  string server_id = 1;
+  int32 entity_id = 2;
+  string entity_type = 3;
+  string query = 4;
+  int32 limit = 5;
+  float min_importance = 6;
+}
+
+message MemoryRecallResponse {
+  repeated Memory memories = 1;
+  int32 total_count = 2;
+}
+
+message Memory {
+  int64 memory_id = 1;
+  string content = 2;
+  float importance = 3;
+  string timestamp = 4;
+  map<string, string> metadata = 5;
+}
+
+// ----- Economy Messages -----
+
+message EconomyRequest {
+  string server_id = 1;
+  string analysis_type = 2;
+  map<string, float> market_data = 3;
+  repeated Transaction recent_transactions = 4;
+}
+
+message EconomyResponse {
+  string analysis_result = 1;
+  map<string, float> price_adjustments = 2;
+  repeated string recommendations = 3;
+  float inflation_rate = 4;
+  string economic_health = 5;
+}
+
+message Transaction {
+  int32 player_id = 1;
+  int32 item_id = 2;
+  int32 quantity = 3;
+  int64 price = 4;
+  string timestamp = 5;
+  string transaction_type = 6;
+}
+
+// ============================================================================
+// Procedural Agent Messages
+// ============================================================================
+
+message NPCGenerationRequest {
+  string server_id = 1;
+  string npc_role = 2;
+  string location = 3;
+  map<string, float> personality_hints = 4;
+  int32 npc_level = 5;
+}
+
+message NPCGenerationResponse {
+  int32 npc_id = 1;
+  string name = 2;
+  string role = 3;
+  map<string, float> personality = 4;
+  string appearance_description = 5;
+  string backstory = 6;
+  repeated string dialogue_samples = 7;
+}
+
+message WorldEventRequest {
+  string server_id = 1;
+  string event_type = 2;
+  string location = 3;
+  int32 player_count = 4;
+  map<string, string> world_state = 5;
+}
+
+message WorldEventResponse {
+  int64 event_id = 1;
+  string event_name = 2;
+  string description = 3;
+  int32 duration_minutes = 4;
+  repeated string affected_maps = 5;
+  map<string, string> event_parameters = 6;
+  repeated Reward rewards = 7;
+}
+
+message ProblemRequest {
+  string server_id = 1;
+  string problem_description = 2;
+  repeated string constraints = 3;
+  map<string, string> available_resources = 4;
+}
+
+message ProblemResponse {
+  string solution = 1;
+  repeated string steps = 2;
+  float confidence = 3;
+  repeated string alternative_solutions = 4;
+}
+
+// ============================================================================
+// Progression Agent Messages
+// ============================================================================
+
+message BossRequest {
+  string server_id = 1;
+  int32 player_level = 2;
+  int32 party_size = 3;
+  string location = 4;
+  repeated string defeated_bosses = 5;
+}
+
+message BossResponse {
+  int32 boss_id = 1;
+  string name = 2;
+  int32 level = 3;
+  int64 hp = 4;
+  int64 attack = 5;
+  int64 defense = 6;
+  repeated Skill skills = 7;
+  repeated string weaknesses = 8;
+  repeated Reward drops = 9;
+  map<string, int32> stats = 10;
+}
+
+message Skill {
+  int32 skill_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 cooldown_seconds = 4;
+  string element = 5;
+}
+
+message FactionRequest {
+  string server_id = 1;
+  int32 player_id = 2;
+  string faction_id = 3;
+  string action_type = 4;
+  float reputation_change = 5;
+}
+
+message FactionResponse {
+  string faction_id = 1;
+  float new_reputation = 2;
+  string faction_rank = 3;
+  repeated string unlocked_benefits = 4;
+  repeated string relationship_changes = 5;
+}
+
+message ReputationRequest {
+  string server_id = 1;
+  int32 player_id = 2;
+  string reputation_type = 3;
+  float change_amount = 4;
+  string reason = 5;
+}
+
+message ReputationResponse {
+  float new_reputation = 1;
+  string reputation_tier = 2;
+  repeated string effects = 3;
+  bool tier_changed = 4;
+}
+
+// ============================================================================
+// Environmental Agent Messages
+// ============================================================================
+
+message HazardRequest {
+  string server_id = 1;
+  string map_id = 2;
+  string hazard_type = 3;
+  int32 danger_level = 4;
+}
+
+message HazardResponse {
+  int64 hazard_id = 1;
+  string hazard_name = 2;
+  string description = 3;
+  repeated Coordinate affected_tiles = 4;
+  int32 damage_per_tick = 5;
+  int32 duration_seconds = 6;
+  string visual_effect = 7;
+}
+
+message Coordinate {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+message TreasureRequest {
+  string server_id = 1;
+  int32 player_level = 2;
+  string location = 3;
+  string treasure_type = 4;
+}
+
+message TreasureResponse {
+  int64 treasure_id = 1;
+  string treasure_name = 2;
+  repeated Clue clues = 3;
+  Coordinate location = 4;
+  repeated Reward rewards = 5;
+  int32 difficulty = 6;
+}
+
+message Clue {
+  string clue_text = 1;
+  string clue_type = 2;
+  int32 clue_order = 3;
+}
+
+message WeatherRequest {
+  string server_id = 1;
+  string map_id = 2;
+  string requested_weather = 3;
+  int32 duration_minutes = 4;
+}
+
+message WeatherResponse {
+  string current_weather = 1;
+  string time_of_day = 2;
+  int32 temperature = 3;
+  repeated string effects = 4;
+  int32 visibility = 5;
+}
+
+// ============================================================================
+// Economy/Social Agent Messages
+// ============================================================================
+
+message KarmaRequest {
+  string server_id = 1;
+  int32 player_id = 2;
+  string action_type = 3;
+  float karma_change = 4;
+  map<string, string> context = 5;
+}
+
+message KarmaResponse {
+  float new_karma = 1;
+  string karma_alignment = 2;
+  repeated string consequences = 3;
+  repeated string available_actions = 4;
+}
+
+message MerchantEconomyRequest {
+  string server_id = 1;
+  int32 merchant_id = 2;
+  repeated int32 item_ids = 3;
+  map<string, float> market_conditions = 4;
+}
+
+message MerchantEconomyResponse {
+  map<int32, int64> optimized_prices = 1;
+  float profit_margin = 2;
+  repeated string pricing_factors = 3;
+  map<int32, int32> stock_recommendations = 4;
+}
+
+message SocialInteractionRequest {
+  string server_id = 1;
+  int32 player_id = 2;
+  int32 target_id = 3;
+  string interaction_type = 4;
+  map<string, string> context = 5;
+}
+
+message SocialInteractionResponse {
+  string result = 1;
+  float relationship_change = 2;
+  repeated string social_effects = 3;
+  repeated string available_interactions = 4;
+}
+
+// ============================================================================
+// Advanced Agent Messages
+// ============================================================================
+
+message DungeonRequest {
+  string server_id = 1;
+  int32 party_level = 2;
+  int32 party_size = 3;
+  string difficulty = 4;
+  string theme = 5;
+}
+
+message DungeonResponse {
+  int64 dungeon_id = 1;
+  string name = 2;
+  int32 floor_count = 3;
+  repeated DungeonFloor floors = 4;
+  repeated BossResponse bosses = 5;
+  int32 estimated_duration_minutes = 6;
+}
+
+message DungeonFloor {
+  int32 floor_number = 1;
+  string layout = 2;
+  repeated int32 monster_ids = 3;
+  repeated string puzzles = 4;
+  repeated Reward loot = 5;
+}
+
+message ArchaeologyRequest {
+  string server_id = 1;
+  int32 player_id = 2;
+  string site_id = 3;
+  string action = 4;
+}
+
+message ArchaeologyResponse {
+  string discovery_type = 1;
+  string discovery_name = 2;
+  string lore_text = 3;
+  repeated Reward rewards = 4;
+  int32 archaeology_xp = 5;
+  bool site_completed = 6;
+}
+
+message EventChainRequest {
+  string server_id = 1;
+  string chain_type = 2;
+  int32 chain_length = 3;
+  map<string, string> starting_conditions = 4;
+}
+
+message EventChainResponse {
+  int64 chain_id = 1;
+  string chain_name = 2;
+  repeated ChainEvent events = 3;
+  int32 total_duration_minutes = 4;
+  repeated Reward final_rewards = 5;
+}
+
+message ChainEvent {
+  int32 event_number = 1;
+  string event_name = 2;
+  string description = 3;
+  repeated string triggers = 4;
+  int32 duration_minutes = 5;
+}
+
+// ============================================================================
+// Streaming Messages
+// ============================================================================
+
+message EventSubscription {
+  string server_id = 1;
+  repeated string event_types = 2;
+  map<string, string> filters = 3;
+}
+
+message WorldEvent {
+  int64 event_id = 1;
+  string event_type = 2;
+  string server_id = 3;
+  string timestamp = 4;
+  map<string, string> event_data = 5;
+  int32 priority = 6;
+}
+
+message MetricsStreamRequest {
+  string server_id = 1;
+  int32 interval_seconds = 2;
+  repeated string metric_types = 3;
+}
+
+message MetricsUpdate {
+  string timestamp = 1;
+  map<string, float> metrics = 2;
+  string server_id = 3;
+}
+
+// ============================================================================
+// Management Messages
+// ============================================================================
+
+message HealthRequest {
+  bool detailed = 1;
+}
+
+message HealthResponse {
+  string status = 1;
+  string version = 2;
+  int64 uptime_seconds = 3;
+  map<string, string> agent_health = 4;
+  int32 active_connections = 5;
+  float cpu_usage = 6;
+  float memory_usage_mb = 7;
+}
+
+message MetricsRequest {
+  string server_id = 1;
+  bool include_agent_metrics = 2;
+}
+
+message MetricsResponse {
+  int64 total_requests = 1;
+  float avg_response_time_ms = 2;
+  int32 active_agents = 3;
+  int64 cache_hit_rate = 4;
+  map<string, AgentMetrics> agent_metrics = 5;
+  int64 memory_usage_bytes = 6;
+  float cpu_usage_percent = 7;
+}
+
+message AgentMetrics {
+  string agent_name = 1;
+  int64 total_executions = 2;
+  float avg_execution_time_ms = 3;
+  int64 cache_hits = 4;
+  int64 cache_misses = 5;
+  int64 errors = 6;
+}
+
+message ServerRegistrationRequest {
+  string server_id = 1;
+  string server_name = 2;
+  string server_ip = 3;
+  int32 server_port = 4;
+  int32 max_players = 5;
+  string server_type = 6;
+}
+
+message ServerRegistrationResponse {
+  bool success = 1;
+  string message = 2;
+  string api_key = 3;
+  int32 rate_limit = 4;
+}
+
+message ServerUnregistrationRequest {
+  string server_id = 1;
+  string reason = 2;
+}
+
+message ServerUnregistrationResponse {
+  bool success = 1;
+  string message = 2;
+}
