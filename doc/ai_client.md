@@ -1,5 +1,7 @@
 # AI Client Integration Guide
 
+> **See Also**: [Complete API Reference](ai-sidecar/API_REFERENCE.md) - Full documentation of all AI Sidecar endpoints and RPCs
+
 ## Overview
 
 The AI Client provides gRPC-based integration between rAthena game server and the AI Sidecar service, enabling AI-powered features such as:

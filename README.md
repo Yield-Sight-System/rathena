@@ -68,7 +68,27 @@ can be solved simply by looking at the error messages given. Check out the [wiki
 or [forums](https://rathena.org/board) if you need more support on troubleshooting.
 
 ## 4. More Documentation
-rAthena has a large collection of help files and sample NPC scripts located in the /doc/
+
+Complete documentation is available in the [`doc/`](doc/) directory:
+
+### AI Sidecar Integration (New Feature)
+- [Quick Start](doc/deployment/QUICK_START.md) - Get AI integration running in 5 minutes
+- [AI Sidecar API](doc/ai-sidecar/API_REFERENCE.md) - Complete API reference
+- [Deployment Guide](doc/deployment/DEPLOYMENT_GUIDE.md) - Production setup
+- [C++ Client Library](doc/ai_client.md) - AIClient integration guide
+
+### Multi-Threading (Performance Enhancement)
+- [Threading Guide](doc/threading.md) - Multi-threading implementation
+- [Performance Summary](doc/MULTITHREADING_SUMMARY.md) - Benchmark results (2.5-4× improvement)
+- [Deployment Guide](doc/MULTITHREADING_DEPLOYMENT.md) - Production rollout
+
+### Production AI Sidecar
+- **Base URL**: https://rathena.cakobox.com
+- **API Docs**: https://rathena.cakobox.com/docs
+- **Health**: https://rathena.cakobox.com/health
+
+### Core Documentation
+rAthena has a large collection of help files and sample NPC scripts located in the [`doc/`](doc/)
 directory. These include detailed explanations of NPC script commands, atcommands (@),
 group permissions, item bonuses, and packet structures, among many other topics. We
 recommend that all users take the time to look over this directory before asking for
