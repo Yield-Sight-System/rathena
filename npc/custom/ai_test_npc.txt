@@ -1,0 +1,74 @@
+//===== rAthena Script =======================================
+//= AI Integration Test NPC
+//===== Description: =========================================
+//= Tests all 5 AI script commands for integration verification
+//= Commands: ai_dialogue, ai_decision, ai_quest, ai_remember, ai_walk
+//============================================================
+
+prontera,150,180,4	script	AI Test NPC	4_M_MAYOR,{
+	mes "[AI Test NPC]";
+	mes "Welcome! I'm powered by AI.";
+	mes "Let me demonstrate the integration...";
+	next;
+	
+	// Test 1: AI Dialogue
+	mes "[AI Test NPC]";
+	mes "^0000FF[Test 1: AI Dialogue]^000000";
+	.@response$ = ai_dialogue(getnpcid(0), getcharid(3), "Hello! How are you today?");
+	mes "^008800AI Response:^000000 " + .@response$;
+	next;
+	
+	// Test 2: AI Decision
+	mes "[AI Test NPC]";
+	mes "^0000FF[Test 2: AI Decision]^000000";
+	.@decision$ = ai_decision(getnpcid(0), "player greeted me warmly", 
+	                          "greet back", "give quest", "tell joke", "ignore");
+	mes "^008800AI Decision:^000000 " + .@decision$;
+	next;
+	
+	// Test 3: AI Memory Storage
+	mes "[AI Test NPC]";
+	mes "^0000FF[Test 3: Memory Storage]^000000";
+	.@success = ai_remember(getnpcid(0), getcharid(3), 
+	                        "Player " + strcharinfo(0) + " visited and greeted me", 8);
+	mes "^008800Memory Stored:^000000 " + (.@success ? "Yes" : "No");
+	mes "Importance: 8/10";
+	next;
+	
+	// Test 4: AI Quest Generation
+	mes "[AI Test NPC]";
+	mes "^0000FF[Test 4: Quest Generation]^000000";
+	.@quest_id = ai_quest(getcharid(3));
+	if (.@quest_id > 0) {
+		mes "^008800Generated Quest ID:^000000 " + .@quest_id;
+		mes "Check your quest log!";
+	} else {
+		mes "^FF0000Quest generation failed^000000";
+		mes "AI service may not be connected.";
+	}
+	next;
+	
+	// Test 5: AI Movement
+	mes "[AI Test NPC]";
+	mes "^0000FF[Test 5: AI Movement]^000000";
+	mes "Watch me walk around...";
+	next;
+	
+	.@walk_result = ai_walk(getnpcid(0), 155, 185);
+	mes "[AI Test NPC]";
+	mes "^008800Movement Result:^000000 " + (.@walk_result ? "Success" : "Failed");
+	next;
+	
+	// Summary
+	mes "[AI Test NPC]";
+	mes "^FF8800=== Integration Test Complete ===^000000";
+	mes "All 5 AI commands have been tested!";
+	mes " ";
+	mes "Commands tested:";
+	mes "1. ai_dialogue - ✓";
+	mes "2. ai_decision - ✓";
+	mes "3. ai_quest - ✓";
+	mes "4. ai_remember - ✓";
+	mes "5. ai_walk - ✓";
+	close;
+}

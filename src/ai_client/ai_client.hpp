@@ -13,24 +13,15 @@
 
 #include "../common/cbasetypes.hpp"
 
-// Forward declarations for gRPC types (avoid including heavy headers)
+// Forward declarations for gRPC types
 namespace grpc {
 	class Channel;
 	class ClientContext;
 	class Status;
 }
 
-namespace rathena {
-namespace ai {
-	class AIWorldService;
-	class DialogueRequest;
-	class DialogueResponse;
-	class DecisionRequest;
-	class DecisionResponse;
-	class QuestRequest;
-	class QuestResponse;
-}
-}
+// Include generated protobuf/gRPC headers for full type definitions
+#include "generated/ai_service.grpc.pb.h"
 
 /**
  * @brief Quest structure returned from AI
@@ -164,6 +155,24 @@ public:
 	 * @note Blocking call - may take time depending on AI processing
 	 */
 	Quest generateQuest(int player_id, int player_level, const char* location);
+	
+	/**
+	 * @brief Store a memory for an NPC
+	 *
+	 * Stores a memory associated with an NPC and optionally a player.
+	 * Memories can be recalled later to influence NPC behavior and dialogue.
+	 *
+	 * @param npc_id Unique ID of the NPC storing the memory
+	 * @param player_id Unique ID of the player associated with this memory
+	 * @param content Text content of the memory to store
+	 * @param importance Importance score (0.0 to 1.0, default 0.5)
+	 * @return true if memory was stored successfully, false on error
+	 *
+	 * @note If not connected, logs a warning and returns false
+	 * @note Thread-safe: Can be called from multiple threads
+	 * @note Blocking call - may take time depending on database operations
+	 */
+	bool storeMemory(int npc_id, int player_id, const char* content, float importance = 0.5f);
 	
 	/**
 	 * @brief Get dialogue asynchronously (non-blocking)

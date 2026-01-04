@@ -399,6 +399,84 @@ Quest AIClient::generateQuest(int player_id, int player_level, const char* locat
 	}
 }
 
+// Store memory
+bool AIClient::storeMemory(int npc_id, int player_id, const char* content, float importance) {
+	if (!connected_) {
+		ShowWarning("AI Client: Not connected, cannot store memory\n");
+		return false;
+	}
+	
+	if (!content) {
+		ShowWarning("AI Client: Null content provided for memory\n");
+		return false;
+	}
+	
+	// Clamp importance to valid range
+	if (importance < 0.0f) importance = 0.0f;
+	if (importance > 1.0f) importance = 1.0f;
+	
+	try {
+		auto start_time = std::chrono::high_resolution_clock::now();
+		
+		// Create context with timeout
+		grpc::ClientContext context;
+		auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(30);
+		context.set_deadline(deadline);
+		
+		// Build request
+		rathena::ai::MemoryRequest request;
+		request.set_server_id(server_id_);
+		request.set_entity_id(npc_id);
+		request.set_entity_type("npc");
+		request.set_content(content);
+		request.set_importance(importance);
+		
+		// Add player_id to metadata for association
+		(*request.mutable_metadata())["player_id"] = std::to_string(player_id);
+		(*request.mutable_metadata())["memory_type"] = "npc_player_interaction";
+		
+		// Make RPC call
+		rathena::ai::MemoryResponse response;
+		grpc::Status status;
+		
+		{
+			std::lock_guard<std::mutex> lock(mutex_);
+			if (!stub_) {
+				ShowError("AI Client: Stub not initialized\n");
+				return false;
+			}
+			status = stub_->StoreMemory(&context, request, &response);
+		}
+		
+		// Calculate latency
+		auto end_time = std::chrono::high_resolution_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+			end_time - start_time);
+		double latency_ms = duration.count();
+		
+		if (status.ok() && response.success()) {
+			updateStats(true, latency_ms);
+			ShowInfo("AI Memory: Stored memory for NPC %d (player %d, importance %.2f) - ID: %lld (%.2f ms)\n",
+			         npc_id, player_id, importance, (long long)response.memory_id(), latency_ms);
+			return true;
+		} else {
+			updateStats(false, latency_ms);
+			if (!response.success()) {
+				ShowError("AI Memory failed: %s\n", response.error_message().c_str());
+			} else {
+				ShowError("AI Memory RPC failed: [%d] %s\n",
+				          status.error_code(), status.error_message().c_str());
+			}
+			return false;
+		}
+		
+	} catch (const std::exception& e) {
+		updateStats(false, 0.0);
+		ShowError("AI Memory exception: %s\n", e.what());
+		return false;
+	}
+}
+
 // Async dialogue - callback wrapper structure
 struct AsyncDialogueData {
 	AIClient* client;

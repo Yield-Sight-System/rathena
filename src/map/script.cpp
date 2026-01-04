@@ -62,6 +62,7 @@
 #include "pet.hpp"
 #include "quest.hpp"
 #include "storage.hpp"
+#include "../ai_client/ai_client.hpp"
 
 using namespace rathena;
 
@@ -27841,6 +27842,174 @@ BUILDIN_FUNC(preg_match) {
 #endif
 }
 
+/*==========================================
+ * AI Dialogue - Get AI-generated NPC dialogue
+ * ai_dialogue(npc_id, player_id, "message")
+ *------------------------------------------*/
+BUILDIN_FUNC(ai_dialogue)
+{
+	int32 npc_id = script_getnum(st, 2);
+	int32 player_id = script_getnum(st, 3);
+	const char* message = script_getstr(st, 4);
+	
+	AIClient& client = AIClient::getInstance();
+	
+	if (!client.isConnected()) {
+		ShowWarning("buildin_ai_dialogue: AI Client not connected\n");
+		script_pushconststr(st, "");
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	std::string response = client.getDialogue(npc_id, player_id, message);
+	script_pushstr(st, aStrdup(response.c_str()));
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+
+/*==========================================
+ * AI Decision - Get AI decision for NPC
+ * ai_decision(npc_id, "situation", "action1", "action2", ...)
+ *------------------------------------------*/
+BUILDIN_FUNC(ai_decision)
+{
+	int32 npc_id = script_getnum(st, 2);
+	const char* situation = script_getstr(st, 3);
+	
+	// Collect all available actions
+	std::vector<std::string> actions;
+	for (int i = 4; script_hasdata(st, i); i++) {
+		const char* action = script_getstr(st, i);
+		if (action && strlen(action) > 0) {
+			actions.push_back(action);
+		}
+	}
+	
+	if (actions.empty()) {
+		ShowWarning("buildin_ai_decision: No actions provided\n");
+		script_pushconststr(st, "");
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	AIClient& client = AIClient::getInstance();
+	
+	if (!client.isConnected()) {
+		ShowWarning("buildin_ai_decision: AI Client not connected\n");
+		script_pushconststr(st, "");
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	std::string decision = client.getDecision(npc_id, situation, actions);
+	script_pushstr(st, aStrdup(decision.c_str()));
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+
+/*==========================================
+ * AI Quest Generation - Generate dynamic quest
+ * ai_quest(player_id)
+ *------------------------------------------*/
+BUILDIN_FUNC(ai_quest)
+{
+	int32 player_id = script_getnum(st, 2);
+	
+	map_session_data* sd = map_id2sd(player_id);
+	if (!sd) {
+		ShowWarning("buildin_ai_quest: Player %d not found\n", player_id);
+		script_pushint(st, 0);
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	AIClient& client = AIClient::getInstance();
+	
+	if (!client.isConnected()) {
+		ShowWarning("buildin_ai_quest: AI Client not connected\n");
+		script_pushint(st, 0);
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	// Get current map name
+	const char* mapname = map_mapid2mapname(sd->m);
+	if (!mapname) {
+		mapname = "unknown";
+	}
+	
+	Quest quest = client.generateQuest(player_id, sd->status.base_level, mapname);
+	
+	if (quest.quest_id > 0) {
+		ShowInfo("buildin_ai_quest: Generated quest %lld '%s' for player %d\n",
+		         (long long)quest.quest_id, quest.title.c_str(), player_id);
+	}
+	
+	script_pushint(st, (int32)quest.quest_id);
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+
+/*==========================================
+ * AI Memory Storage - Store NPC memory
+ * ai_remember(npc_id, player_id, "content", importance?)
+ *------------------------------------------*/
+BUILDIN_FUNC(ai_remember)
+{
+	int32 npc_id = script_getnum(st, 2);
+	int32 player_id = script_getnum(st, 3);
+	const char* content = script_getstr(st, 4);
+	
+	// Optional importance parameter (default 5 out of 10)
+	float importance = 0.5f;
+	if (script_hasdata(st, 5)) {
+		int32 imp_value = script_getnum(st, 5);
+		// Scale from 0-10 to 0.0-1.0
+		importance = (float)imp_value / 10.0f;
+		if (importance < 0.0f) importance = 0.0f;
+		if (importance > 1.0f) importance = 1.0f;
+	}
+	
+	AIClient& client = AIClient::getInstance();
+	
+	if (!client.isConnected()) {
+		ShowWarning("buildin_ai_remember: AI Client not connected\n");
+		script_pushint(st, 0);
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	bool success = client.storeMemory(npc_id, player_id, content, importance);
+	script_pushint(st, success ? 1 : 0);
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+
+/*==========================================
+ * AI Walk - AI-driven NPC movement
+ * ai_walk(npc_id, x, y)
+ *------------------------------------------*/
+BUILDIN_FUNC(ai_walk)
+{
+	int32 npc_id = script_getnum(st, 2);
+	int32 x = script_getnum(st, 3);
+	int32 y = script_getnum(st, 4);
+	
+	block_list* bl = map_id2bl(npc_id);
+	if (!bl || bl->type != BL_NPC) {
+		ShowWarning("buildin_ai_walk: NPC %d not found or invalid\n", npc_id);
+		script_pushint(st, 0);
+		return SCRIPT_CMD_FAILURE;
+	}
+	
+	// Move NPC to coordinates
+	int result = unit_walktoxy(bl, x, y, 0);
+	
+	if (result == 0) {
+		ShowDebug("buildin_ai_walk: NPC %d walking to (%d,%d)\n", npc_id, x, y);
+		script_pushint(st, 1);
+		return SCRIPT_CMD_SUCCESS;
+	} else {
+		ShowWarning("buildin_ai_walk: NPC %d failed to walk to (%d,%d)\n", npc_id, x, y);
+		script_pushint(st, 0);
+		return SCRIPT_CMD_FAILURE;
+	}
+}
+
 /// script command definitions
 /// for an explanation on args, see add_buildin_func
 struct script_function buildin_func[] = {
@@ -28568,6 +28737,13 @@ struct script_function buildin_func[] = {
 	BUILDIN_DEF2(permission_add, "permission_remove", "i?"),
 
 	BUILDIN_DEF( mesitemicon, "v??" ),
+
+	// AI World Integration
+	BUILDIN_DEF(ai_dialogue, "iis"),
+	BUILDIN_DEF(ai_decision, "is*"),
+	BUILDIN_DEF(ai_quest, "i"),
+	BUILDIN_DEF(ai_remember, "iis?"),
+	BUILDIN_DEF(ai_walk, "iii"),
 
 #include <custom/script_def.inc>
 
