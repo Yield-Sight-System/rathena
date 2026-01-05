@@ -63,6 +63,7 @@
 #include "quest.hpp"
 #include "storage.hpp"
 #include "../ai_client/ai_client.hpp"
+#include "../common/gamemode.hpp"
 
 using namespace rathena;
 
@@ -28010,6 +28011,41 @@ BUILDIN_FUNC(ai_walk)
 	}
 }
 
+/*==========================================
+ * Game Mode Commands - Dual Mode System
+ *------------------------------------------*/
+
+/*==========================================
+ * Get current game mode
+ * getgamemode()
+ * Returns "HORMONE" or "BASIC"
+ *------------------------------------------*/
+BUILDIN_FUNC(getgamemode)
+{
+	GameMode mode = GameModeClient::getInstance().getCurrentMode();
+	
+	if (mode == GAME_MODE_HORMONE) {
+		script_pushconststr(st, "HORMONE");
+	} else {
+		script_pushconststr(st, "BASIC");
+	}
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+
+/*==========================================
+ * Check if current mode is HORMONE mode
+ * ishormomode()
+ * Returns 1 if HORMONE, 0 if BASIC
+ *------------------------------------------*/
+BUILDIN_FUNC(ishormomode)
+{
+	bool is_hormone = (GameModeClient::getInstance().getCurrentMode() == GAME_MODE_HORMONE);
+	script_pushint(st, is_hormone ? 1 : 0);
+	
+	return SCRIPT_CMD_SUCCESS;
+}
+
 /// script command definitions
 /// for an explanation on args, see add_buildin_func
 struct script_function buildin_func[] = {
@@ -28744,6 +28780,10 @@ struct script_function buildin_func[] = {
 	BUILDIN_DEF(ai_quest, "i"),
 	BUILDIN_DEF(ai_remember, "iis?"),
 	BUILDIN_DEF(ai_walk, "iii"),
+
+	// Game Mode System
+	BUILDIN_DEF(getgamemode, ""),
+	BUILDIN_DEF(ishormomode, ""),
 
 #include <custom/script_def.inc>
 

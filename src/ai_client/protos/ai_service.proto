@@ -107,6 +107,14 @@ service AIWorldService {
   
   // UnregisterServer: Unregister game server
   rpc UnregisterServer(ServerUnregistrationRequest) returns (ServerUnregistrationResponse);
+  
+  // ===== Game Mode Management RPCs =====
+  
+  // GetServerMode: Get current server mode configuration
+  rpc GetServerMode(ServerModeRequest) returns (ServerModeResponse);
+  
+  // SubscribeToModeChanges: Subscribe to real-time mode change events
+  rpc SubscribeToModeChanges(ServerModeRequest) returns (stream ModeChangeEvent);
 }
 
 // ============================================================================
@@ -650,4 +658,42 @@ message ServerUnregistrationRequest {
 message ServerUnregistrationResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ============================================================================
+// Game Mode Management Messages
+// ============================================================================
+
+// Game mode request message
+message ServerModeRequest {
+  string server_id = 1;
+}
+
+// Mode configuration details
+message ModeConfigMessage {
+  float exp_rate = 1;
+  float drop_rate = 2;
+  string quest_difficulty = 3;
+  bool ai_features_enabled = 4;
+  string death_penalty = 5;
+  string social_features = 6;
+  bool achievement_system = 7;
+  string bot_farming = 8;
+}
+
+// Server mode response
+message ServerModeResponse {
+  string current_mode = 1;  // "BASIC" or "HORMONE"
+  int64 switched_at = 2;
+  ModeConfigMessage config = 3;
+  bool success = 4;
+}
+
+// Mode change event for streaming
+message ModeChangeEvent {
+  string server_id = 1;
+  string new_mode = 2;
+  ModeConfigMessage config = 3;
+  int64 timestamp = 4;
+  string switched_by = 5;
 }

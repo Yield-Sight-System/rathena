@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <common/gamemode.hpp>
+
 #include <common/cbasetypes.hpp>
 #include <common/database.hpp>
 #include <common/malloc.hpp>
@@ -1091,6 +1093,12 @@ void achievement_update_objective(map_session_data *sd, enum e_achievement_group
 {
 	if (!battle_config.feature_achievement)
 		return;
+
+	// Check if achievement system is disabled in current game mode
+	if (GameModeClient::getInstance().isInitialized() &&
+	    !GameModeClient::getInstance().isAchievementSystemEnabled()) {
+		return; // Achievement system disabled in BASIC mode
+	}
 
 	if (sd) {
 		va_list ap;

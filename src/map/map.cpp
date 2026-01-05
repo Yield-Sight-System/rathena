@@ -12,6 +12,7 @@
 #include <common/cli.hpp>
 #include <common/core.hpp>
 #include <common/ers.hpp>
+#include <common/gamemode.hpp>
 #include <common/grfio.hpp>
 #include <common/malloc.hpp>
 #include <common/nullpo.hpp>
@@ -5046,6 +5047,10 @@ void MapServer::finalize(){
 #ifndef MAP_GENERATOR
 	do_final_clif();
 #endif
+	
+	// Shutdown Game Mode Client
+	GameModeClient::getInstance().shutdown();
+	
 	do_final_npc();
 	do_final_quest();
 	do_final_achievement();
@@ -5440,6 +5445,15 @@ bool MapServer::initialize( int32 argc, char *argv[] ){
 	do_init_elemental();
 	do_init_quest();
 	do_init_achievement();
+	
+	// Initialize Game Mode Client
+	ShowStatus("Initializing Game Mode Client...\n");
+	if (GameModeClient::getInstance().initialize("server_001")) {
+		ShowStatus("Game Mode Client initialized.\n");
+	} else {
+		ShowWarning("Game Mode Client failed to initialize.\n");
+	}
+	
 	do_init_battleground();
 	do_init_npc();
 	do_init_unit();

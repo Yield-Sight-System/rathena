@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <map>
 
+#include <common/gamemode.hpp>
+
 #ifdef MAP_GENERATOR
 #include <fstream>
 #include <iostream>
@@ -8471,6 +8473,17 @@ void pc_gainexp(map_session_data *sd, block_list *src, t_exp base_exp, t_exp job
 	if (!(exp_flag&2))
 		pc_calcexp(sd, &base_exp, &job_exp, src);
 
+	// Apply game mode multipliers
+	if (GameModeClient::getInstance().isInitialized()) {
+		float mode_exp_rate = get_mode_exp_rate();
+		if (mode_exp_rate != 1.0f) {
+			base_exp = static_cast<t_exp>(base_exp * mode_exp_rate);
+			job_exp = static_cast<t_exp>(job_exp * mode_exp_rate);
+			ShowInfo("GameMode: Applied %.2fx EXP multiplier (Base: %llu, Job: %llu)\n",
+				mode_exp_rate, base_exp, job_exp);
+		}
+	}
+
 	nextb = pc_nextbaseexp(sd);
 	nextj = pc_nextjobexp(sd);
 
@@ -10030,6 +10043,16 @@ int32 pc_dead(map_session_data *sd,block_list *src)
 		}
 		else
 			job_penalty = 0;
+
+		// Apply game mode death penalty multiplier
+		if ((base_penalty || job_penalty) && GameModeClient::getInstance().isInitialized()) {
+			float penalty_multiplier = GameModeClient::getInstance().getDeathPenaltyMultiplier();
+			if (penalty_multiplier != 1.0f) {
+				base_penalty = static_cast<t_exp>(base_penalty * penalty_multiplier);
+				job_penalty = static_cast<t_exp>(job_penalty * penalty_multiplier);
+				ShowInfo("GameMode: Applied %.2fx death penalty multiplier\n", penalty_multiplier);
+			}
+		}
 
 		if (base_penalty || job_penalty) {
 			int16 insurance_idx = pc_search_inventory(sd, ITEMID_NEW_INSURANCE);

@@ -12,6 +12,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <common/gamemode.hpp>
+
 #include <common/cbasetypes.hpp>
 #include <common/core.hpp>
 #include <common/db.hpp>
@@ -3298,6 +3300,16 @@ int32 mob_getdroprate(block_list *src, std::shared_ptr<s_mob_db> mob, int32 base
 #ifdef RENEWAL_DROP
 	drop_rate = apply_rate( drop_rate, drop_modifier );
 #endif
+
+	// Apply game mode drop rate multiplier
+	if (GameModeClient::getInstance().isInitialized()) {
+		float mode_drop_rate = get_mode_drop_rate();
+		if (mode_drop_rate != 1.0f) {
+			drop_rate = static_cast<int32>(drop_rate * mode_drop_rate);
+			ShowInfo("GameMode: Applied %.2fx drop multiplier (Drop rate: %d)\n",
+				mode_drop_rate, drop_rate);
+		}
+	}
 
 	// Cap it to 100%
 	drop_rate = min( drop_rate, 10000 * factor );
