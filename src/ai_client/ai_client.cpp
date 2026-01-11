@@ -11,16 +11,7 @@
 
 #include "../common/showmsg.hpp"
 #include "../common/timer.hpp"
-
-// For async operations - we'll reference the global thread pool if available
-// This will be properly linked when integrated with map server
-extern "C" {
-	// Forward declarations for threading functions (from Phase 3)
-	// These will be properly defined when linked with map-server
-	bool is_threading_enabled();
-	void* get_cpu_worker_pool();
-	void thread_pool_submit(void* pool, void (*func)(void*), void* arg);
-}
+#include "../common/core.hpp"
 
 // Singleton instance
 AIClient& AIClient::getInstance() {
@@ -477,35 +468,6 @@ bool AIClient::storeMemory(int npc_id, int player_id, const char* content, float
 	}
 }
 
-// Async dialogue - callback wrapper structure
-struct AsyncDialogueData {
-	AIClient* client;
-	int npc_id;
-	int player_id;
-	std::string message;
-	std::function<void(const std::string&)> callback;
-};
-
-// C-style callback for thread pool
-static void async_dialogue_worker(void* data) {
-	AsyncDialogueData* async_data = static_cast<AsyncDialogueData*>(data);
-	
-	if (async_data) {
-		std::string result = async_data->client->getDialogue(
-			async_data->npc_id,
-			async_data->player_id,
-			async_data->message.c_str()
-		);
-		
-		// Call the user's callback
-		if (async_data->callback) {
-			async_data->callback(result);
-		}
-		
-		delete async_data;
-	}
-}
-
 // Get dialogue asynchronously
 void AIClient::getDialogueAsync(int npc_id, int player_id, const char* message,
                                  std::function<void(const std::string&)> callback) {
@@ -520,7 +482,7 @@ void AIClient::getDialogueAsync(int npc_id, int player_id, const char* message,
 	// Check if threading is available
 	// If not, fall back to synchronous call
 	bool threading_available = false;
-	void* pool = nullptr;
+	ThreadPool* pool = nullptr;
 	
 	try {
 		threading_available = is_threading_enabled();
@@ -541,21 +503,21 @@ void AIClient::getDialogueAsync(int npc_id, int player_id, const char* message,
 		return;
 	}
 	
-	// Create async data structure
-	AsyncDialogueData* async_data = new AsyncDialogueData();
-	async_data->client = this;
-	async_data->npc_id = npc_id;
-	async_data->player_id = player_id;
-	async_data->message = message;
-	async_data->callback = callback;
-	
-	// Submit to thread pool
+	// Submit to thread pool using C++ lambda
 	try {
-		thread_pool_submit(pool, async_dialogue_worker, async_data);
+		// Copy the message string for the lambda
+		std::string msg_copy(message);
+		
+		pool->submit([this, npc_id, player_id, msg_copy, callback]() {
+			std::string result = this->getDialogue(npc_id, player_id, msg_copy.c_str());
+			if (callback) {
+				callback(result);
+			}
+		});
+		
 		ShowDebug("AI Client: Dialogue request submitted to thread pool\n");
 	} catch (const std::exception& e) {
 		ShowError("AI Client: Failed to submit async task: %s\n", e.what());
-		delete async_data;
 		// Fall back to synchronous
 		std::string result = getDialogue(npc_id, player_id, message);
 		if (callback) {
