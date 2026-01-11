@@ -4,13 +4,16 @@
 #include "gamemode.hpp"
 
 #include <chrono>
-#include <grpcpp/grpcpp.h>
 
-#include "showmsg.hpp"
+#ifdef HAVE_AI_CLIENT
+#include <grpcpp/grpcpp.h>
 
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
+#endif
+
+#include "showmsg.hpp"
 
 // Singleton instance
 GameModeClient* GameModeClient::instance_ = nullptr;
@@ -61,6 +64,7 @@ bool GameModeClient::initialize(const std::string& server_id) {
 	
 	server_id_ = server_id;
 	
+#ifdef HAVE_AI_CLIENT
 	// Create gRPC channel (localhost:50051 is default gRPC port)
 	const char* grpc_endpoint = "localhost:50051";
 	
@@ -125,7 +129,7 @@ bool GameModeClient::initialize(const std::string& server_id) {
 			ShowStatus("GameModeClient: Initial mode: %s (EXP: %.2fx, Drop: %.2fx)\n",
 				mode_str.c_str(), current_config_.exp_rate, current_config_.drop_rate);
 		} else {
-			ShowWarning("GameModeClient: Failed to get initial mode: %s\n", 
+			ShowWarning("GameModeClient: Failed to get initial mode: %s\n",
 				status.error_message().c_str());
 			// Continue with defaults
 		}
@@ -139,6 +143,13 @@ bool GameModeClient::initialize(const std::string& server_id) {
 	listener_thread_ = std::thread(&GameModeClient::listener_thread_func, this);
 	
 	ShowStatus("GameModeClient: Initialized successfully for server '%s'\n", server_id_.c_str());
+#else
+	// Without AI Client, always use BASIC mode
+	current_config_.mode = GAME_MODE_BASIC;
+	current_mode_.store(GAME_MODE_BASIC, std::memory_order_release);
+	running_.store(true, std::memory_order_release);
+	ShowStatus("GameModeClient: Initialized in BASIC mode (AI Client disabled)\n");
+#endif
 	return true;
 }
 
@@ -159,8 +170,10 @@ void GameModeClient::shutdown() {
 	// Reset state
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
+#ifdef HAVE_AI_CLIENT
 		channel_.reset();
 		stub_.reset();
+#endif
 		server_id_.clear();
 		current_mode_.store(GAME_MODE_BASIC, std::memory_order_release);
 	}
@@ -172,6 +185,7 @@ void GameModeClient::shutdown() {
  * @brief Background thread for streaming mode changes
  */
 void GameModeClient::listener_thread_func() {
+#ifdef HAVE_AI_CLIENT
 	ShowInfo("GameModeClient: Listener thread started\n");
 	
 	while (running_.load(std::memory_order_acquire)) {
@@ -226,7 +240,7 @@ void GameModeClient::listener_thread_func() {
 			Status status = reader->Finish();
 			
 			if (!status.ok()) {
-				ShowWarning("GameModeClient: Stream ended with error: %s\n", 
+				ShowWarning("GameModeClient: Stream ended with error: %s\n",
 					status.error_message().c_str());
 			}
 			
@@ -242,6 +256,7 @@ void GameModeClient::listener_thread_func() {
 	}
 	
 	ShowInfo("GameModeClient: Listener thread stopped\n");
+#endif
 }
 
 /**

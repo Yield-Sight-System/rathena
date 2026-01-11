@@ -2820,7 +2820,7 @@ static int32 mob_ai_hard_threaded(t_tick tick) {
 	std::atomic<size_t> completed{0};
 	
 	for (const auto& snapshot : snapshots) {
-		pool->submit([snapshot, tick, &results, &results_mutex, &completed]() {
+		pool->submit([snapshot, tick, &completed]() {
 			// Compute AI decision (thread-safe, read-only operations)
 			mob_ai_result result = mob_ai_compute_threadsafe(snapshot, tick);
 			

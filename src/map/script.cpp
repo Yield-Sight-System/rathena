@@ -62,7 +62,9 @@
 #include "pet.hpp"
 #include "quest.hpp"
 #include "storage.hpp"
+#ifdef HAVE_AI_CLIENT
 #include "../ai_client/ai_client.hpp"
+#endif
 #include "../common/gamemode.hpp"
 
 using namespace rathena;
@@ -27843,6 +27845,7 @@ BUILDIN_FUNC(preg_match) {
 #endif
 }
 
+#ifdef HAVE_AI_CLIENT
 /*==========================================
  * AI Dialogue - Get AI-generated NPC dialogue
  * ai_dialogue(npc_id, player_id, "message")
@@ -27868,7 +27871,7 @@ BUILDIN_FUNC(ai_dialogue)
 }
 
 /*==========================================
- * AI Decision - Get AI decision for NPC
+	* AI Decision - Get AI decision for NPC
  * ai_decision(npc_id, "situation", "action1", "action2", ...)
  *------------------------------------------*/
 BUILDIN_FUNC(ai_decision)
@@ -28010,6 +28013,7 @@ BUILDIN_FUNC(ai_walk)
 		return SCRIPT_CMD_FAILURE;
 	}
 }
+#endif
 
 /*==========================================
  * Game Mode Commands - Dual Mode System
@@ -28775,11 +28779,13 @@ struct script_function buildin_func[] = {
 	BUILDIN_DEF( mesitemicon, "v??" ),
 
 	// AI World Integration
+#ifdef HAVE_AI_CLIENT
 	BUILDIN_DEF(ai_dialogue, "iis"),
 	BUILDIN_DEF(ai_decision, "is*"),
 	BUILDIN_DEF(ai_quest, "i"),
 	BUILDIN_DEF(ai_remember, "iis?"),
 	BUILDIN_DEF(ai_walk, "iii"),
+#endif
 
 	// Game Mode System
 	BUILDIN_DEF(getgamemode, ""),

@@ -12,6 +12,7 @@
 
 #include "cbasetypes.hpp"
 
+#ifdef HAVE_AI_CLIENT
 // Forward declarations for gRPC types
 namespace grpc {
 	class Channel;
@@ -21,6 +22,7 @@ namespace grpc {
 
 // Include generated protobuf/gRPC headers
 #include "../ai_client/generated/ai_service.grpc.pb.h"
+#endif
 
 /**
  * @brief Game mode enumeration
@@ -206,9 +208,11 @@ private:
 	static GameModeClient* instance_;
 	static std::mutex instance_mutex_;
 	
+#ifdef HAVE_AI_CLIENT
 	// gRPC connection
 	std::shared_ptr<grpc::Channel> channel_;
 	std::unique_ptr<rathena::ai::AIWorldService::Stub> stub_;
+#endif
 	
 	// Server identification
 	std::string server_id_;
